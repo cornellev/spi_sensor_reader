@@ -124,6 +124,7 @@ def main():
 
     try:
         while True:
+            # You should usually use read_snapshot() instead for less overhead
             snap = reader.read_snapshot_dict()
 
             # snap should never be None here unless SHM disappeared mid-run

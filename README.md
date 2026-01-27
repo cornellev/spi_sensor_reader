@@ -58,7 +58,7 @@ Script should be continuously updated hook up more sensors.
     
     try:
         while True:
-            snap = reader.read_snapshot_dict()
+            snap = reader.read_snapshot() # or read_snapshot_dict(), but that's more overhead
             if snap:
                 # Do whatever you want with the data
             time.sleep(0.005)  # ~200 Hz
