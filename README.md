@@ -13,24 +13,24 @@ Script should be continuously updated hook up more sensors.
 {
     "seq": int,
     "power": {
-        "ts": int,
-        "current": float,
-        "voltage": float,
+        "ts": int,            # d[0]
+        "current": float,     # d[1]
+        "voltage": float,     # d[2]
     },
     "motor": {
-        "ts": int,
-        "throttle": float,
-        "velocity": float,
+        "ts": int,            # d[3]
+        "throttle": float,    # d[4]
+        "velocity": float,    # d[5]
     },
     "rpm_front": {
-        "ts": int,
-        "rpm_left": float,
-        "rpm_right": float,
+        "ts": int,            # d[6]
+        "rpm_left": float,    # d[7]
+        "rpm_right": float,   # d[8]
     },
     "rpm_back": {
-        "ts": int,
-        "rpm_left": float,
-        "rpm_right": float,
+        "ts": int,            # d[9]
+        "rpm_left": float,    # d[10]
+        "rpm_right": float,   # d[11]
     },
 }
 ```
