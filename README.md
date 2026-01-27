@@ -79,7 +79,3 @@ Current SPI setup (for Electrical reference):
 | 5     | 22      | Motor controller     | u32 ts + float thr + float vel |
 
 Bus: `/dev/spidev0.0`
-
-## TODO
-
-Change to Power monitor GPIO22, Motor controller GPIO23, RPM GPIO24, remove SG
