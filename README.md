@@ -70,11 +70,11 @@ Script should be continuously updated hook up more sensors.
 
 Current SPI setup (for Electrical reference):
 
-| Slave | CS GPIO | Description          | Format                     |
-|-------|---------|----------------------|----------------------------|
-| 1     | 22      | Power       | u32 ts + float current + float voltage    |
-| 2     | 23      | Motor       | u32 ts + float throttle + float velocity  |
-| 3     | 24      | Front RPM       | u32 ts + float rpm_left + float rpm_right   |
-| 4     | 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
+| CS GPIO | Description          | Format                     |
+|---------|----------------------|----------------------------|
+| 22      | Power Monitor      | u32 ts + float current + float voltage    |
+| 23      | Motor Controller      | u32 ts + float throttle + float velocity  |
+| 24      | Front RPM       | u32 ts + float rpm_left + float rpm_right   |
+| 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
 
 Bus: `/dev/spidev0.0`
