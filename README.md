@@ -72,10 +72,9 @@ Current SPI setup (for Electrical reference):
 
 | Slave | CS GPIO | Description          | Format                     |
 |-------|---------|----------------------|----------------------------|
-| 1     | 23      | Strain Gauge 1       | u32 ts + 3×u16             |
-| 2     | 24      | Strain Gauge 2       | u32 ts + 3×u16             |
-| 3     | 25      | Strain Gauge 3       | u32 ts + 3×u16             |
-| 4     | 27      | Power monitor        | u32 ts + float I + float V |
-| 5     | 22      | Motor controller     | u32 ts + float thr + float vel |
+| 1     | 22      | Power       | u32 ts + float current + float voltage    |
+| 2     | 23      | Motor       | u32 ts + float throttle + float velocity  |
+| 3     | 24      | Front RPM       | u32 ts + float rpm_left + float rpm_right   |
+| 4     | 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
 
 Bus: `/dev/spidev0.0`
