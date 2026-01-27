@@ -11,26 +11,26 @@ Script should be continuously updated hook up more sensors.
 
 ```python
 {
-    "seq": int,
+    "seq": int,               # read_snapshot()[0]
     "power": {
-        "ts": int,            # d[0]
-        "current": float,     # d[1]
-        "voltage": float,     # d[2]
+        "ts": int,            # read_snapshot()[1][0]
+        "current": float,     # read_snapshot()[1][1]
+        "voltage": float,     # read_snapshot()[1][2]
     },
     "motor": {
-        "ts": int,            # d[3]
-        "throttle": float,    # d[4]
-        "velocity": float,    # d[5]
+        "ts": int,            # read_snapshot()[1][3]
+        "throttle": float,    # read_snapshot()[1][4]
+        "velocity": float,    # read_snapshot()[1][5]
     },
     "rpm_front": {
-        "ts": int,            # d[6]
-        "rpm_left": float,    # d[7]
-        "rpm_right": float,   # d[8]
+        "ts": int,            # read_snapshot()[1][6]
+        "rpm_left": float,    # read_snapshot()[1][7]
+        "rpm_right": float,   # read_snapshot()[1][8]
     },
     "rpm_back": {
-        "ts": int,            # d[9]
-        "rpm_left": float,    # d[10]
-        "rpm_right": float,   # d[11]
+        "ts": int,            # read_snapshot()[1][9]
+        "rpm_left": float,    # read_snapshot()[1][10]
+        "rpm_right": float,   # read_snapshot()[1][11]
     },
 }
 ```
