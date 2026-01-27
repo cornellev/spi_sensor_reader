@@ -45,7 +45,7 @@ struct RPM {
 
 #pragma pack(push, 1)
 struct GPS {
-  uint32_t ts_gps; 
+  uint32_t ts; 
   float gps_lat;
   float gps_long;
 };
