@@ -9,11 +9,10 @@ Import this file to read from shared memory
 SHM_NAME = "sensor_shm"
 
 SENSOR_FMT = "<" + (
-    "I" + "3H" +        # sg1
-    "I" + "3H" +        # sg2
-    "I" + "3H" +        # sg3
     "I" + "f" + "f" +   # power
-    "I" + "f" + "f"     # motor
+    "I" + "f" + "f" +   # motor
+    "I" + "f" + "f" +   # rpm_front
+    "I" + "f" + "f"     # rpm_back
 )
 SENSOR_SIZE = struct.calcsize(SENSOR_FMT)
 SEQ_SIZE = 4
@@ -21,7 +20,6 @@ BLOCK_SIZE = SEQ_SIZE + SENSOR_SIZE
 
 def _read_seq(buf, offset=0) -> int:
     return int.from_bytes(buf[offset:offset + SEQ_SIZE], "little", signed=False)
-
 
 class SensorShmReader:
     """
@@ -91,17 +89,33 @@ class SensorShmReader:
         return {
             "seq": seq,
 
-            "sg1": {"ts": d[0],  "values": [d[1],  d[2],  d[3]]},
-            "sg2": {"ts": d[4],  "values": [d[5],  d[6],  d[7]]},
-            "sg3": {"ts": d[8],  "values": [d[9],  d[10], d[11]]},
+            "power": {
+                "ts": d[0],
+                "current": d[1],
+                "voltage": d[2],
+            },
 
-            "power": {"ts": d[12], "current": d[13], "voltage": d[14]},
-            "motor": {"ts": d[15], "throttle": d[16], "velocity": d[17]},
+            "motor": {
+                "ts": d[3],
+                "throttle": d[4],
+                "velocity": d[5],
+            },
+
+            "rpm_front": {
+                "ts": d[6],
+                "rpm_left": d[7],
+                "rpm_right": d[8],
+            },
+
+            "rpm_back": {
+                "ts": d[9],
+                "rpm_left": d[10],
+                "rpm_right": d[11],
+            },
         }
 
-
 def main():
-    RATE = 200
+    RATE = 10
     PERIOD = 1/RATE
 
     reader = SensorShmReader()
@@ -114,14 +128,7 @@ def main():
 
             # snap should never be None here unless SHM disappeared mid-run
             if snap is not None:
-                print(
-                    f"seq={snap['seq']} | "
-                    f"sg1(ts={snap['sg1']['ts']},[{snap['sg1']['values'][0]},{snap['sg1']['values'][1]},{snap['sg1']['values'][2]}]) "
-                    f"sg2(ts={snap['sg2']['ts']},[{snap['sg2']['values'][0]},{snap['sg2']['values'][1]},{snap['sg2']['values'][2]}]) "
-                    f"sg3(ts={snap['sg3']['ts']},[{snap['sg3']['values'][0]},{snap['sg3']['values'][1]},{snap['sg3']['values'][2]}]) | "
-                    f"power(ts={snap['power']['ts']},I={snap['power']['current']:.3f},V={snap['power']['voltage']:.3f}) | "
-                    f"motor(ts={snap['motor']['ts']},thr={snap['motor']['throttle']:.3f},vel={snap['motor']['velocity']:.3f})"
-                )
+                print(snap)
 
             time.sleep(PERIOD)
 

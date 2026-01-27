@@ -17,32 +17,56 @@ constexpr uint8_t  SPI_MODE  = 1;          // CPOL=0, CPHA=1
 constexpr uint32_t SPI_SPEED = 1000000;    // 1 MHz
 constexpr const char* SPI_DEVICE = "/dev/spidev0.0";
 
-#define GPIO_CS1 23
-#define GPIO_CS2 24
-#define GPIO_CS3 25
-#define GPIO_CS4 27
-#define GPIO_CS5 22
+static constexpr int CS_PINS[4] = {22, 23, 24, 25};
 
 #pragma pack(push, 1)
-struct SensorSnapshot {
-  uint32_t ts_sg1; uint16_t sg1[3];
-  uint32_t ts_sg2; uint16_t sg2[3];
-  uint32_t ts_sg3; uint16_t sg3[3];
-
-  uint32_t ts_power;
+struct Power {
+  uint32_t ts;
   float current;
   float voltage;
+};
+#pragma pack(pop)
 
-  uint32_t ts_motor;
+#pragma pack(push, 1)
+struct Motor {
+  uint32_t ts;
   float throttle;
   float velocity;
 };
 #pragma pack(pop)
 
+#pragma pack(push, 1)
+struct RPM {
+  uint32_t ts;
+  float rpm_left;
+  float rpm_right;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct GPS {
+  uint32_t ts_gps; 
+  float gps_lat;
+  float gps_long;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct SensorSnapshot {
+  Power power_snap;
+  Motor motor_snap;
+  RPM rpm_snap_front;
+  RPM rpm_snap_back;
+  // GPS gps_snap; TODO
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
 struct SharedBlock {
-  std::atomic<uint32_t> seq;   // seqlock
+  std::atomic<uint32_t> seq;
   SensorSnapshot data;
 };
+#pragma pack(pop)
 
 static constexpr const char* SHM_NAME = "/sensor_shm";
 
@@ -60,11 +84,9 @@ public:
     }
     std::fprintf(stderr, "pigpio initialized\n");
 
-    set_mode(pi_, GPIO_CS1, PI_OUTPUT);
-    set_mode(pi_, GPIO_CS2, PI_OUTPUT);
-    set_mode(pi_, GPIO_CS3, PI_OUTPUT);
-    set_mode(pi_, GPIO_CS4, PI_OUTPUT);
-    set_mode(pi_, GPIO_CS5, PI_OUTPUT);
+    for (int i = 0; i < 4; i++) {
+      set_mode(pi_, CS_PINS[i], PI_OUTPUT);
+    }
     deselect_all_cs();
 
     spi_fd_ = open(SPI_DEVICE, O_RDWR);
@@ -116,16 +138,13 @@ private:
   int spi_fd_{-1};
   bool ok_{false};
 
-  // SHM
   int shm_fd_{-1};
   SharedBlock* shm_{nullptr};
 
-  // same buffers as original version
-  std::vector<uint8_t> p1 = std::vector<uint8_t>(10, 0x00);
-  std::vector<uint8_t> p2 = std::vector<uint8_t>(10, 0x00);
-  std::vector<uint8_t> p3 = std::vector<uint8_t>(10, 0x00);
-  std::vector<uint8_t> p4 = std::vector<uint8_t>(12, 0x00);
-  std::vector<uint8_t> p5 = std::vector<uint8_t>(12, 0x00);
+  std::vector<uint8_t> power_buffer = std::vector<uint8_t>(sizeof(Power), 0x00);
+  std::vector<uint8_t> motor_buffer = std::vector<uint8_t>(sizeof(Motor), 0x00);
+  std::vector<uint8_t> rpm_buffer_front = std::vector<uint8_t>(sizeof(RPM), 0x00);
+  std::vector<uint8_t> rpm_buffer_back = std::vector<uint8_t>(sizeof(RPM), 0x00);
 
   bool init_shm() {
     shm_fd_ = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
@@ -186,19 +205,15 @@ private:
   }
 
   void select_cs(int chipSelect) {
-    gpio_write(pi_, GPIO_CS1, chipSelect == 1 ? 0 : 1);
-    gpio_write(pi_, GPIO_CS2, chipSelect == 2 ? 0 : 1);
-    gpio_write(pi_, GPIO_CS3, chipSelect == 3 ? 0 : 1);
-    gpio_write(pi_, GPIO_CS4, chipSelect == 4 ? 0 : 1);
-    gpio_write(pi_, GPIO_CS5, chipSelect == 5 ? 0 : 1);
+    for (int i = 1; i < 5; i++) { 
+      gpio_write(pi_, CS_PINS[i-1], chipSelect == i ? 0 : 1);
+    }
   }
 
   void deselect_all_cs() {
-    gpio_write(pi_, GPIO_CS1, 1);
-    gpio_write(pi_, GPIO_CS2, 1);
-    gpio_write(pi_, GPIO_CS3, 1);
-    gpio_write(pi_, GPIO_CS4, 1);
-    gpio_write(pi_, GPIO_CS5, 1);
+    for (int i = 1; i < 5; i++) { 
+      gpio_write(pi_, CS_PINS[i-1], 1);
+    }
   }
 
   std::vector<uint8_t> readData(int chipSelect, int len) {
@@ -210,7 +225,7 @@ private:
     spi_ioc_transfer t{};
     t.tx_buf = reinterpret_cast<unsigned long>(tx.data());
     t.rx_buf = reinterpret_cast<unsigned long>(rx.data());
-    t.len = len;
+    t.len = static_cast<uint32_t>(len);
     t.speed_hz = SPI_SPEED;
     t.bits_per_word = 8;
 
@@ -223,42 +238,29 @@ private:
   }
 
   void timer_callback() {
-    p1 = readData(1, 10);
-    p2 = readData(2, 10);
-    p3 = readData(3, 10);
-    p4 = readData(4, 12);
-    p5 = readData(5, 12);
+    power_buffer = readData(1, sizeof(Power));
+    motor_buffer = readData(2, sizeof(Motor));
+    rpm_buffer_front = readData(3, sizeof(RPM));
+    rpm_buffer_back = readData(4, sizeof(RPM));
 
     SensorSnapshot snap{};
-    uint32_t timestamp = 0;
 
-    timestamp = (p1[3]) | (p1[2] << 8) | (p1[1] << 16) | (p1[0] << 24);
-    snap.ts_sg1 = timestamp;
-    snap.sg1[0] = (p1[5]) | (p1[4] << 8);
-    snap.sg1[1] = (p1[7]) | (p1[6] << 8);
-    snap.sg1[2] = (p1[9]) | (p1[8] << 8);
+    // TODO: factor bitwise ops into helpers
+    snap.power_snap.ts = (power_buffer[3]) | (power_buffer[2] << 8) | (power_buffer[1] << 16) | (power_buffer[0] << 24);
+    snap.power_snap.current = unpack_float(power_buffer[4], power_buffer[5], power_buffer[6], power_buffer[7]);
+    snap.power_snap.voltage = unpack_float(power_buffer[8], power_buffer[9], power_buffer[10], power_buffer[11]);
 
-    timestamp = (p2[3]) | (p2[2] << 8) | (p2[1] << 16) | (p2[0] << 24);
-    snap.ts_sg2 = timestamp;
-    snap.sg2[0] = (p2[5]) | (p2[4] << 8);
-    snap.sg2[1] = (p2[7]) | (p2[6] << 8);
-    snap.sg2[2] = (p2[9]) | (p2[8] << 8);
+    snap.motor_snap.ts = (motor_buffer[3]) | (motor_buffer[2] << 8) | (motor_buffer[1] << 16) | (motor_buffer[0] << 24);
+    snap.motor_snap.throttle = unpack_float(motor_buffer[4], motor_buffer[5], motor_buffer[6], motor_buffer[7]);
+    snap.motor_snap.velocity = unpack_float(motor_buffer[8], motor_buffer[9], motor_buffer[10], motor_buffer[11]);
 
-    timestamp = (p3[3]) | (p3[2] << 8) | (p3[1] << 16) | (p3[0] << 24);
-    snap.ts_sg3 = timestamp;
-    snap.sg3[0] = (p3[5]) | (p3[4] << 8);
-    snap.sg3[1] = (p3[7]) | (p3[6] << 8);
-    snap.sg3[2] = (p3[9]) | (p3[8] << 8);
+    snap.rpm_snap_front.ts = (rpm_buffer_front[3]) | (rpm_buffer_front[2] << 8) | (rpm_buffer_front[1] << 16) | (rpm_buffer_front[0] << 24);
+    snap.rpm_snap_front.rpm_left = unpack_float(rpm_buffer_front[4], rpm_buffer_front[5], rpm_buffer_front[6], rpm_buffer_front[7]);
+    snap.rpm_snap_front.rpm_right = unpack_float(rpm_buffer_front[8], rpm_buffer_front[9], rpm_buffer_front[10], rpm_buffer_front[11]);
 
-    timestamp = (p4[3]) | (p4[2] << 8) | (p4[1] << 16) | (p4[0] << 24);
-    snap.ts_power = timestamp;
-    snap.current  = unpack_float(p4[4], p4[5], p4[6], p4[7]);
-    snap.voltage  = unpack_float(p4[8], p4[9], p4[10], p4[11]);
-
-    timestamp = (p5[3]) | (p5[2] << 8) | (p5[1] << 16) | (p5[0] << 24);
-    snap.ts_motor = timestamp;
-    snap.throttle = unpack_float(p5[4], p5[5], p5[6], p5[7]);
-    snap.velocity = unpack_float(p5[8], p5[9], p5[10], p5[11]);
+    snap.rpm_snap_back.ts = (rpm_buffer_back[3]) | (rpm_buffer_back[2] << 8) | (rpm_buffer_back[1] << 16) | (rpm_buffer_back[0] << 24);
+    snap.rpm_snap_back.rpm_left = unpack_float(rpm_buffer_back[4], rpm_buffer_back[5], rpm_buffer_back[6], rpm_buffer_back[7]);
+    snap.rpm_snap_back.rpm_right = unpack_float(rpm_buffer_back[8], rpm_buffer_back[9], rpm_buffer_back[10], rpm_buffer_back[11]);
 
     write_snapshot(snap);
   }
