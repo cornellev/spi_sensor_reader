@@ -12,11 +12,26 @@ Script should be continuously updated hook up more sensors.
 ```python
 {
     "seq": int,
-    "sg1": {"ts": int, "values": [int, int, int]},
-    "sg2": {"ts": int, "values": [int, int, int]},
-    "sg3": {"ts": int, "values": [int, int, int]},
-    "power": {"ts": int, "current": float, "voltage": float},
-    "motor": {"ts": int, "throttle": float, "velocity": float}
+    "power": {
+        "ts": int,
+        "current": float,
+        "voltage": float,
+    },
+    "motor": {
+        "ts": int,
+        "throttle": float,
+        "velocity": float,
+    },
+    "rpm_front": {
+        "ts": int,
+        "rpm_left": float,
+        "rpm_right": float,
+    },
+    "rpm_back": {
+        "ts": int,
+        "rpm_left": float,
+        "rpm_right": float,
+    },
 }
 ```
 
