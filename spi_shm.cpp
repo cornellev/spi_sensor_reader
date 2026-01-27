@@ -40,7 +40,7 @@ struct SensorSnapshot {
 #pragma pack(pop)
 
 struct SharedBlock {
-  std::atomic<uint64_t> seq;   // seqlock
+  std::atomic<uint32_t> seq;   // seqlock
   SensorSnapshot data;
 };
 
@@ -169,7 +169,7 @@ private:
 
   inline void write_snapshot(const SensorSnapshot& snap) {
     if (!shm_) return;
-    uint64_t s = shm_->seq.load(std::memory_order_relaxed);
+    uint32_t s = shm_->seq.load(std::memory_order_relaxed);
     shm_->seq.store(s + 1, std::memory_order_release); // odd => write in progress
     shm_->data = snap;                                 // plain memcpy-able struct
     shm_->seq.store(s + 2, std::memory_order_release); // even => stable

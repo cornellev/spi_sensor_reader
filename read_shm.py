@@ -16,11 +16,11 @@ SENSOR_FMT = "<" + (
     "I" + "f" + "f"     # motor
 )
 SENSOR_SIZE = struct.calcsize(SENSOR_FMT)
-SEQ_SIZE = 8
+SEQ_SIZE = 4
 BLOCK_SIZE = SEQ_SIZE + SENSOR_SIZE
 
-def _read_u64_le(buf, offset=0) -> int:
-    return int.from_bytes(buf[offset:offset + 8], "little", signed=False)
+def _read_seq(buf, offset=0) -> int:
+    return int.from_bytes(buf[offset:offset + SEQ_SIZE], "little", signed=False)
 
 
 class SensorShmReader:
@@ -68,13 +68,13 @@ class SensorShmReader:
 
         buf = self._buf
         while True:
-            seq1 = _read_u64_le(buf, 0)
+            seq1 = _read_seq(buf, 0)
             if seq1 & 1:
                 continue
 
             payload = bytes(buf[SEQ_SIZE:SEQ_SIZE + SENSOR_SIZE])
 
-            seq2 = _read_u64_le(buf, 0)
+            seq2 = _read_seq(buf, 0)
             if seq1 == seq2 and not (seq2 & 1):
                 return seq2, struct.unpack(SENSOR_FMT, payload)
 
