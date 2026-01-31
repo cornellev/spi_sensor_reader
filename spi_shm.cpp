@@ -57,7 +57,7 @@ struct SensorSnapshot {
   Motor motor_snap;
   RPM rpm_snap_front;
   RPM rpm_snap_back;
-  // GPS gps_snap; TODO
+  GPS gps_snap; // TODO
 };
 #pragma pack(pop)
 
@@ -145,7 +145,8 @@ private:
   std::vector<uint8_t> motor_buffer = std::vector<uint8_t>(sizeof(Motor), 0x00);
   std::vector<uint8_t> rpm_buffer_front = std::vector<uint8_t>(sizeof(RPM), 0x00);
   std::vector<uint8_t> rpm_buffer_back = std::vector<uint8_t>(sizeof(RPM), 0x00);
-
+  // std::vector<uint8_t> gps_buffer = std::vector<uint8_t>(sizeof(GPS), 0x00);
+  
   bool init_shm() {
     shm_fd_ = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd_ < 0) { std::perror("shm_open"); return false; }
@@ -261,6 +262,11 @@ private:
     snap.rpm_snap_back.ts = (rpm_buffer_back[3]) | (rpm_buffer_back[2] << 8) | (rpm_buffer_back[1] << 16) | (rpm_buffer_back[0] << 24);
     snap.rpm_snap_back.rpm_left = unpack_float(rpm_buffer_back[4], rpm_buffer_back[5], rpm_buffer_back[6], rpm_buffer_back[7]);
     snap.rpm_snap_back.rpm_right = unpack_float(rpm_buffer_back[8], rpm_buffer_back[9], rpm_buffer_back[10], rpm_buffer_back[11]);
+
+    // TODO: GPS reading
+    snap.gps_snap.ts = 0;
+    snap.gps_snap.gps_lat = 0.0f;
+    snap.gps_snap.gps_long = 0.0f;
 
     write_snapshot(snap);
   }
