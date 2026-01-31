@@ -16,11 +16,13 @@ SENSOR_FMT = "<" + (
     "I" + "f" + "f"     # gps
 )
 SENSOR_SIZE = struct.calcsize(SENSOR_FMT)
-SEQ_SIZE = 4
+
+SEQ_FMT = "<I"
+SEQ_SIZE = struct.calcsize(SEQ_FMT)
 BLOCK_SIZE = SEQ_SIZE + SENSOR_SIZE
 
-def _read_seq(buf, offset=0) -> int:
-    return int.from_bytes(buf[offset:offset + SEQ_SIZE], "little", signed=False)
+def _read_seq(buf) -> int:
+    return struct.unpack_from(SEQ_FMT, buf, 0)[0]
 
 class SensorShmReader:
     """
@@ -67,15 +69,16 @@ class SensorShmReader:
 
         buf = self._buf
         while True:
-            seq1 = _read_seq(buf, 0)
+            seq1 = _read_seq(buf)
             if seq1 & 1:
                 continue
 
-            payload = bytes(buf[SEQ_SIZE:SEQ_SIZE + SENSOR_SIZE])
+            # unpack directly from the shared memory buffer (no slice/bytes needed)
+            data = struct.unpack_from(SENSOR_FMT, buf, SEQ_SIZE)
 
-            seq2 = _read_seq(buf, 0)
+            seq2 = _read_seq(buf)
             if seq1 == seq2 and not (seq2 & 1):
-                return seq2, struct.unpack(SENSOR_FMT, payload)
+                return seq2, data
 
     def read_snapshot_dict(self):
         """
@@ -86,44 +89,18 @@ class SensorShmReader:
             return None
 
         seq, d = snap
-
         return {
             "seq": seq,
-
-            "power": {
-                "ts": d[0],
-                "current": d[1],
-                "voltage": d[2],
-            },
-
-            "motor": {
-                "ts": d[3],
-                "throttle": d[4],
-                "velocity": d[5],
-            },
-
-            "rpm_front": {
-                "ts": d[6],
-                "rpm_left": d[7],
-                "rpm_right": d[8],
-            },
-
-            "rpm_back": {
-                "ts": d[9],
-                "rpm_left": d[10],
-                "rpm_right": d[11],
-            },
-
-            "gps": {
-                "ts": d[12],
-                "gps_lat": d[13],
-                "gps_long": d[14],
-            }
+            "power": {"ts": d[0],  "current": d[1],  "voltage": d[2]},
+            "motor": {"ts": d[3],  "throttle": d[4], "velocity": d[5]},
+            "rpm_front": {"ts": d[6], "rpm_left": d[7], "rpm_right": d[8]},
+            "rpm_back": {"ts": d[9], "rpm_left": d[10], "rpm_right": d[11]},
+            "gps": {"ts": d[12], "gps_lat": d[13], "gps_long": d[14]},
         }
 
 def main():
     RATE = 10
-    PERIOD = 1/RATE
+    PERIOD = 1 / RATE
 
     reader = SensorShmReader()
     if not reader.available:
@@ -131,18 +108,13 @@ def main():
 
     try:
         while True:
-            # You should usually use read_snapshot() instead for less overhead
             snap = reader.read_snapshot_dict()
-
-            # snap should never be None here unless SHM disappeared mid-run
             if snap is not None:
                 print(snap)
-
             time.sleep(PERIOD)
-
     finally:
         reader.close()
 
-
 if __name__ == "__main__":
     raise SystemExit(main())
+

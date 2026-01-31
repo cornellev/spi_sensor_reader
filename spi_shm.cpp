@@ -249,16 +249,23 @@ private:
     return rx;
   }
 
-  static inline uint32_t u32_le(const std::vector<uint8_t>& b, size_t off) {
-    return (static_cast<uint32_t>(b[off + 0])      ) |
-          (static_cast<uint32_t>(b[off + 1]) <<  8) |
-          (static_cast<uint32_t>(b[off + 2]) << 16) |
-          (static_cast<uint32_t>(b[off + 3]) << 24);
+  static inline uint32_t be32_to_le_u32(const std::vector<uint8_t>& b, size_t off) {
+    return (uint32_t(b[off + 0]) << 24) |
+          (uint32_t(b[off + 1]) << 16) |
+          (uint32_t(b[off + 2]) <<  8) |
+          (uint32_t(b[off + 3])      );
   }
 
-  static inline float f32_le(const std::vector<uint8_t>& b, size_t off) {
-    // little-endian: b[off] is LSB
-    return unpack_float(b[off + 0], b[off + 1], b[off + 2], b[off + 3]);
+  static inline float le_f32(const std::vector<uint8_t>& b, size_t off) {
+    // SPI slaves already send floats little-endian
+    uint32_t bits =
+        (uint32_t(b[off + 0])      ) |
+        (uint32_t(b[off + 1]) <<  8) |
+        (uint32_t(b[off + 2]) << 16) |
+        (uint32_t(b[off + 3]) << 24);
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
   }
 
   void timer_callback() {
@@ -269,23 +276,28 @@ private:
 
     SensorSnapshot snap{};
 
-    snap.power_snap.ts      = u32_le(power_buffer, 0);
-    snap.power_snap.current = f32_le(power_buffer, 4);
-    snap.power_snap.voltage = f32_le(power_buffer, 8);
+    // This is evil but I think Erica's current SPI slaves use BE for timestamps and LE for floats
+    // Power
+    snap.power_snap.ts      = be32_to_le_u32(power_buffer, 0);
+    snap.power_snap.current = le_f32(power_buffer, 4);
+    snap.power_snap.voltage = le_f32(power_buffer, 8);
 
-    snap.motor_snap.ts       = u32_le(motor_buffer, 0);
-    snap.motor_snap.throttle = f32_le(motor_buffer, 4);
-    snap.motor_snap.velocity = f32_le(motor_buffer, 8);
+    // Motor
+    snap.motor_snap.ts       = be32_to_le_u32(motor_buffer, 0);
+    snap.motor_snap.throttle = le_f32(motor_buffer, 4);
+    snap.motor_snap.velocity = le_f32(motor_buffer, 8);
 
-    snap.rpm_snap_front.ts        = u32_le(rpm_buffer_front, 0);
-    snap.rpm_snap_front.rpm_left  = f32_le(rpm_buffer_front, 4);
-    snap.rpm_snap_front.rpm_right = f32_le(rpm_buffer_front, 8);
+    // RPM front
+    snap.rpm_snap_front.ts        = be32_to_le_u32(rpm_buffer_front, 0);
+    snap.rpm_snap_front.rpm_left  = le_f32(rpm_buffer_front, 4);
+    snap.rpm_snap_front.rpm_right = le_f32(rpm_buffer_front, 8);
 
-    snap.rpm_snap_back.ts        = u32_le(rpm_buffer_back, 0);
-    snap.rpm_snap_back.rpm_left  = f32_le(rpm_buffer_back, 4);
-    snap.rpm_snap_back.rpm_right = f32_le(rpm_buffer_back, 8);
+    // RPM back
+    snap.rpm_snap_back.ts        = be32_to_le_u32(rpm_buffer_back, 0);
+    snap.rpm_snap_back.rpm_left  = le_f32(rpm_buffer_back, 4);
+    snap.rpm_snap_back.rpm_right = le_f32(rpm_buffer_back, 8);
 
-    // TODO: GPS reading
+    // GPS (until implemented)
     snap.gps_snap.ts = 0;
     snap.gps_snap.gps_lat = 0.0f;
     snap.gps_snap.gps_long = 0.0f;
