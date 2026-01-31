@@ -11,26 +11,26 @@ Script should be continuously updated hook up more sensors.
 
 ```python
 {
-    "seq": int,
+    "seq": int,               # read_snapshot()[0]
     "power": {
-        "ts": int,
-        "current": float,
-        "voltage": float,
+        "ts": int,            # read_snapshot()[1][0]
+        "current": float,     # read_snapshot()[1][1]
+        "voltage": float,     # read_snapshot()[1][2]
     },
     "motor": {
-        "ts": int,
-        "throttle": float,
-        "velocity": float,
+        "ts": int,            # read_snapshot()[1][3]
+        "throttle": float,    # read_snapshot()[1][4]
+        "velocity": float,    # read_snapshot()[1][5]
     },
     "rpm_front": {
-        "ts": int,
-        "rpm_left": float,
-        "rpm_right": float,
+        "ts": int,            # read_snapshot()[1][6]
+        "rpm_left": float,    # read_snapshot()[1][7]
+        "rpm_right": float,   # read_snapshot()[1][8]
     },
     "rpm_back": {
-        "ts": int,
-        "rpm_left": float,
-        "rpm_right": float,
+        "ts": int,            # read_snapshot()[1][9]
+        "rpm_left": float,    # read_snapshot()[1][10]
+        "rpm_right": float,   # read_snapshot()[1][11]
     },
 }
 ```
@@ -70,12 +70,11 @@ Script should be continuously updated hook up more sensors.
 
 Current SPI setup (for Electrical reference):
 
-| Slave | CS GPIO | Description          | Format                     |
-|-------|---------|----------------------|----------------------------|
-| 1     | 23      | Strain Gauge 1       | u32 ts + 3×u16             |
-| 2     | 24      | Strain Gauge 2       | u32 ts + 3×u16             |
-| 3     | 25      | Strain Gauge 3       | u32 ts + 3×u16             |
-| 4     | 27      | Power monitor        | u32 ts + float I + float V |
-| 5     | 22      | Motor controller     | u32 ts + float thr + float vel |
+| CS GPIO | Description          | Format                     |
+|---------|----------------------|----------------------------|
+| 22      | Power Monitor      | u32 ts + float current + float voltage    |
+| 23      | Motor Controller      | u32 ts + float throttle + float velocity  |
+| 24      | Front RPM       | u32 ts + float rpm_left + float rpm_right   |
+| 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
 
 Bus: `/dev/spidev0.0`
