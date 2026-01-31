@@ -5,13 +5,14 @@
 #include <sys/stat.h>
 #include <linux/spi/spidev.h>
 #include <pigpiod_if2.h>
-
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <vector>
 #include <csignal>
+#include <cstddef>
+
 
 constexpr uint8_t  SPI_MODE  = 1;          // CPOL=0, CPHA=1
 constexpr uint32_t SPI_SPEED = 1000000;    // 1 MHz
@@ -45,14 +46,14 @@ struct RPM {
 
 #pragma pack(push, 1)
 struct GPS {
-  uint32_t ts; 
+  uint32_t ts;
   float gps_lat;
   float gps_long;
 };
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct SensorSnapshot {
+struct SensorSnapshot { // 12 * 5 = 60 bytes
   Power power_snap;
   Motor motor_snap;
   RPM rpm_snap_front;
@@ -62,11 +63,21 @@ struct SensorSnapshot {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct SharedBlock {
+struct SharedBlock { // 64 bytes
   std::atomic<uint32_t> seq;
   SensorSnapshot data;
 };
 #pragma pack(pop)
+
+static_assert(sizeof(std::atomic<uint32_t>) == 4, "atomic<uint32_t> must be 4 bytes");
+static_assert(offsetof(SharedBlock, seq) == 0, "seq must be at offset 0");
+static_assert(offsetof(SharedBlock, data) == 4, "data must start immediately after seq");
+static_assert(sizeof(Power) == 12);
+static_assert(sizeof(Motor) == 12);
+static_assert(sizeof(RPM) == 12);
+static_assert(sizeof(GPS) == 12);
+static_assert(sizeof(SensorSnapshot) == 60);
+static_assert(sizeof(SharedBlock) == 64);
 
 static constexpr const char* SHM_NAME = "/sensor_shm";
 
@@ -128,7 +139,7 @@ public:
   void spin() {
     while (!g_stop) {
       timer_callback();
-      usleep(5000); // 5 ms => 200 Hz-ish
+      usleep(1000); // 1 ms => 1 kHz
     }
     std::fprintf(stderr, "SIGINT received, exiting...\n");
   }
@@ -238,6 +249,18 @@ private:
     return rx;
   }
 
+  static inline uint32_t u32_le(const std::vector<uint8_t>& b, size_t off) {
+    return (static_cast<uint32_t>(b[off + 0])      ) |
+          (static_cast<uint32_t>(b[off + 1]) <<  8) |
+          (static_cast<uint32_t>(b[off + 2]) << 16) |
+          (static_cast<uint32_t>(b[off + 3]) << 24);
+  }
+
+  static inline float f32_le(const std::vector<uint8_t>& b, size_t off) {
+    // little-endian: b[off] is LSB
+    return unpack_float(b[off + 0], b[off + 1], b[off + 2], b[off + 3]);
+  }
+
   void timer_callback() {
     power_buffer = readData(1, sizeof(Power));
     motor_buffer = readData(2, sizeof(Motor));
@@ -246,22 +269,21 @@ private:
 
     SensorSnapshot snap{};
 
-    // TODO: factor bitwise ops into helpers
-    snap.power_snap.ts = (power_buffer[3]) | (power_buffer[2] << 8) | (power_buffer[1] << 16) | (power_buffer[0] << 24);
-    snap.power_snap.current = unpack_float(power_buffer[4], power_buffer[5], power_buffer[6], power_buffer[7]);
-    snap.power_snap.voltage = unpack_float(power_buffer[8], power_buffer[9], power_buffer[10], power_buffer[11]);
+    snap.power_snap.ts      = u32_le(power_buffer, 0);
+    snap.power_snap.current = f32_le(power_buffer, 4);
+    snap.power_snap.voltage = f32_le(power_buffer, 8);
 
-    snap.motor_snap.ts = (motor_buffer[3]) | (motor_buffer[2] << 8) | (motor_buffer[1] << 16) | (motor_buffer[0] << 24);
-    snap.motor_snap.throttle = unpack_float(motor_buffer[4], motor_buffer[5], motor_buffer[6], motor_buffer[7]);
-    snap.motor_snap.velocity = unpack_float(motor_buffer[8], motor_buffer[9], motor_buffer[10], motor_buffer[11]);
+    snap.motor_snap.ts       = u32_le(motor_buffer, 0);
+    snap.motor_snap.throttle = f32_le(motor_buffer, 4);
+    snap.motor_snap.velocity = f32_le(motor_buffer, 8);
 
-    snap.rpm_snap_front.ts = (rpm_buffer_front[3]) | (rpm_buffer_front[2] << 8) | (rpm_buffer_front[1] << 16) | (rpm_buffer_front[0] << 24);
-    snap.rpm_snap_front.rpm_left = unpack_float(rpm_buffer_front[4], rpm_buffer_front[5], rpm_buffer_front[6], rpm_buffer_front[7]);
-    snap.rpm_snap_front.rpm_right = unpack_float(rpm_buffer_front[8], rpm_buffer_front[9], rpm_buffer_front[10], rpm_buffer_front[11]);
+    snap.rpm_snap_front.ts        = u32_le(rpm_buffer_front, 0);
+    snap.rpm_snap_front.rpm_left  = f32_le(rpm_buffer_front, 4);
+    snap.rpm_snap_front.rpm_right = f32_le(rpm_buffer_front, 8);
 
-    snap.rpm_snap_back.ts = (rpm_buffer_back[3]) | (rpm_buffer_back[2] << 8) | (rpm_buffer_back[1] << 16) | (rpm_buffer_back[0] << 24);
-    snap.rpm_snap_back.rpm_left = unpack_float(rpm_buffer_back[4], rpm_buffer_back[5], rpm_buffer_back[6], rpm_buffer_back[7]);
-    snap.rpm_snap_back.rpm_right = unpack_float(rpm_buffer_back[8], rpm_buffer_back[9], rpm_buffer_back[10], rpm_buffer_back[11]);
+    snap.rpm_snap_back.ts        = u32_le(rpm_buffer_back, 0);
+    snap.rpm_snap_back.rpm_left  = f32_le(rpm_buffer_back, 4);
+    snap.rpm_snap_back.rpm_right = f32_le(rpm_buffer_back, 8);
 
     // TODO: GPS reading
     snap.gps_snap.ts = 0;
