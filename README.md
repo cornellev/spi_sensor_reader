@@ -32,7 +32,7 @@ Script should be continuously updated hook up more sensors.
         "rpm_left": float,    # read_snapshot()[1][10]
         "rpm_right": float,   # read_snapshot()[1][11]
     },
-    "rpm_back": {             # Currently Unimplemented
+    "gps": {                  # Currently Unimplemented
         "ts": int,            # read_snapshot()[1][12]
         "lat": float,         # read_snapshot()[1][13]
         "long": float,        # read_snapshot()[1][14]
