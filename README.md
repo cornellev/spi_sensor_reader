@@ -44,11 +44,11 @@ Script should be continuously updated hook up more sensors.
 
 1. **Compile & run the C++ writerBash**
    ```bash
-   g++ -O2 -std=c++17 spi_shm.cpp \
+   g++ -O2 -std=c++17 write_shm.cpp \
       -lpigpiod_if2 -lrt -pthread \
-      -o spi_writer
+      -o shm_writer
 
-   ./spi_writer
+   ./shm_writer
    ```
    (keep this running in one terminal — Ctrl+C to stop cleanly)
  
