@@ -78,7 +78,7 @@ Current SPI setup (for Electrical reference):
 | CS GPIO | Description          | Format                     |
 |---------|----------------------|----------------------------|
 | 22      | Power Monitor      | u32 ts + float current + float voltage    |
-| 23      | Motor Controller      | u32 ts + float throttle + float velocity  |
+| 23      | "Motor Controller," will be repurposed for driver input data     | u32 ts + float throttle + float velocity  |
 | 24      | Front RPM       | u32 ts + float rpm_left + float rpm_right   |
 | 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
 
