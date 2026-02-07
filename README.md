@@ -17,7 +17,7 @@ Script should be continuously updated hook up more sensors.
         "current": float,     # read_snapshot()[1][1]
         "voltage": float,     # read_snapshot()[1][2]
     },
-    "motor": {
+    "motor": { # TODO: Change this to throttle % and brake %, rename to "inputs"
         "ts": int,            # read_snapshot()[1][3]
         "throttle": float,    # read_snapshot()[1][4]
         "velocity": float,    # read_snapshot()[1][5]
