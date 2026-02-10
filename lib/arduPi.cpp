@@ -21,6 +21,15 @@
 
 
 #include "arduPi.h"
+#include <cstdint>
+
+namespace unistd {
+  using ::usleep;
+  using ::read;
+  using ::write;
+  using ::close;
+  using ::lseek;
+}
 
 struct bcm2835_peripheral gpio = {GPIO_BASE2};
 struct bcm2835_peripheral bsc_rev1 = {IOBASE + 0X205000};
@@ -918,12 +927,14 @@ void WirePi::wait_i2c_done() {
     }
     
     mapaddr = spi0Mem;
-    if (((uint32_t)mapaddr % PAGESIZE) != 0)
-        mapaddr += PAGESIZE - ((uint32_t)mapaddr % PAGESIZE) ;
+    uintptr_t addr = reinterpret_cast<uintptr_t>(mapaddr);
+    if ((addr % PAGESIZE) != 0) {
+        mapaddr += PAGESIZE - (addr % PAGESIZE);
+    }
     
     spi0 = (uint32_t *)mmap(mapaddr, BLOCK_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED, gpio.mem_fd, BCM2835_SPI0_BASE2) ;
     
-    if ((int32_t)spi0 < 0){
+    if (spi0 == MAP_FAILED) {
         fprintf(stderr, "bcm2835_init: mmap failed (spi0): %s\n", strerror(errno)) ;
         exit(1);
     }
