@@ -26,16 +26,16 @@
 // Worst-case stuffing expands by about 20%. Add margin.
 #define FRAME_MAX_BYTES 128
 
-static uint8_t frame_buf[FRAME_MAX_BYTES];
-static int data_chan;
+uint8_t frame_buf[FRAME_MAX_BYTES];
+int data_chan;
 
-static inline void set_gpio_hi_z(uint pin) {
+inline void set_gpio_hi_z(uint pin) {
     io_bank0_hw->io[pin].ctrl =
         (io_bank0_hw->io[pin].ctrl & ~IO_BANK0_GPIO0_CTRL_OEOVER_BITS) |
         (IO_BANK0_GPIO0_CTRL_OEOVER_VALUE_DISABLE << IO_BANK0_GPIO0_CTRL_OEOVER_LSB);
 }
 
-static void configure_dma(void) {
+void configure_dma(void) {
     data_chan = dma_claim_unused_channel(true);
     dma_channel_config c = dma_channel_get_default_config(data_chan);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
@@ -54,7 +54,7 @@ static void configure_dma(void) {
 }
 
 // IEEE CRC32 
-static uint32_t calculate_crc32(const uint8_t* data, size_t length) {
+uint32_t calculate_crc32(const uint8_t* data, size_t length) {
     uint32_t crc = 0xFFFFFFFF;
     for (size_t i = 0; i < length; i++) {
         crc ^= data[i];
@@ -67,7 +67,7 @@ static uint32_t calculate_crc32(const uint8_t* data, size_t length) {
 }
 
 // Writes bits into frame_buf sequentially; bitpos 0 maps to bit 7 of byte 0.
-static bool put_bit(uint8_t *out, size_t out_cap_bytes, int *bitpos, uint8_t bit) {
+bool put_bit(uint8_t *out, size_t out_cap_bytes, int *bitpos, uint8_t bit) {
     int bp = *bitpos;
     int byte_i = bp >> 3;
     int bit_i  = bp & 7;
@@ -78,14 +78,14 @@ static bool put_bit(uint8_t *out, size_t out_cap_bytes, int *bitpos, uint8_t bit
     return true;
 }
 
-static bool put_byte_msb(uint8_t *out, size_t cap, int *bitpos, uint8_t v) {
+bool put_byte_msb(uint8_t *out, size_t cap, int *bitpos, uint8_t v) {
     for (int b = 7; b >= 0; b--) {
         if (!put_bit(out, cap, bitpos, (v >> b) & 1u)) return false;
     }
     return true;
 }
 
-static bool put_bytes_stuffed(uint8_t *out, size_t cap, int *bitpos,
+bool put_bytes_stuffed(uint8_t *out, size_t cap, int *bitpos,
                               const uint8_t *data, size_t nbytes,
                               int *ones)
 {
@@ -110,17 +110,17 @@ static bool put_bytes_stuffed(uint8_t *out, size_t cap, int *bitpos,
     return true;
 }
 
-static inline int bytes_used_from_bitpos(int bitpos) {
+inline int bytes_used_from_bitpos(int bitpos) {
     return (bitpos + 7) >> 3;
 }
 
 // Fake data generation (sine)
-static inline float fake_signal_from_timestamp(uint32_t now_us) {
+inline float fake_signal_from_timestamp(uint32_t now_us) {
     float t = (float)now_us * 1e-6f;
     return 127.0f * sinf(t) + 127.0f;
 }
 
-static size_t build_payload(uint8_t *payload, size_t payload_cap, uint32_t now_us, int n_floats) {
+size_t build_payload(uint8_t *payload, size_t payload_cap, uint32_t now_us, int n_floats) {
     if (n_floats < 0) n_floats = 0;
     if (n_floats > MAX_FLOATS) n_floats = MAX_FLOATS;
 
@@ -149,7 +149,7 @@ static size_t build_payload(uint8_t *payload, size_t payload_cap, uint32_t now_u
 }
 
 // START + STUFF(payload|crc) + END
-static int build_frame(uint8_t *out, size_t out_cap,
+int build_frame(uint8_t *out, size_t out_cap,
                        const uint8_t *payload, size_t payload_len) {
     memset(out, 0, out_cap);
     int bitpos = 0;

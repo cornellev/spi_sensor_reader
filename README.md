@@ -1,4 +1,4 @@
-# spi_sensor_reader
+# uc26_sensor_reader
 
 C++ SPI reader → POSIX shared memory (seqlock) → Python reader  
 ~200 Hz sampling of strain gauges, power, and motor data.
@@ -6,6 +6,8 @@ C++ SPI reader → POSIX shared memory (seqlock) → Python reader
 Use this library to continuously poll sensor data and read it easily in Python.
 
 Script should be continuously updated hook up more sensors.
+
+Also includes `spi_slave.c` to make embedded a bit easier for the team.
 
 ## Python Data Structure
 
