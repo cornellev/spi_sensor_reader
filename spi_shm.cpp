@@ -13,12 +13,115 @@
 #include <csignal>
 #include <cstddef>
 
+static constexpr uint8_t  FLAG_BYTE = 0x7E;
+static constexpr int SPI_READ_MAX = 64;    // bytes clocked per transaction (>= worst-case frame)
 
 constexpr uint8_t  SPI_MODE  = 1;          // CPOL=0, CPHA=1
 constexpr uint32_t SPI_SPEED = 1000000;    // 1 MHz
 constexpr const char* SPI_DEVICE = "/dev/spidev0.0";
 
 static constexpr int CS_PINS[4] = {22, 23, 24, 25};
+
+static uint32_t crc32_ieee(const uint8_t* data, size_t len) {
+  uint32_t crc = 0xFFFFFFFFu;
+  for (size_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (int j = 0; j < 8; j++) {
+      crc = (crc & 1u) ? ((crc >> 1) ^ 0xEDB88320u) : (crc >> 1);
+    }
+  }
+  return ~crc;
+}
+
+static inline uint32_t u32_le_bytes(const uint8_t* p) {
+  return (uint32_t)p[0] |
+         ((uint32_t)p[1] << 8) |
+         ((uint32_t)p[2] << 16) |
+         ((uint32_t)p[3] << 24);
+}
+
+static inline float f32_le_bytes(const uint8_t* p) {
+  uint32_t bits = u32_le_bytes(p);
+  float out;
+  std::memcpy(&out, &bits, sizeof(out));
+  return out;
+}
+
+// Returns true on success and fills payload_out with the decoded payload
+static bool decode_hdlc_frame(const std::vector<uint8_t>& rx,
+                              size_t payload_len,
+                              std::vector<uint8_t>& payload_out)
+{
+  payload_out.clear();
+  if (payload_len == 0) return false;
+
+  int first_flag_end_bit = -1;  // bit index where first flag ends (inclusive)
+  int second_flag_start_bit = -1; // bit index where second flag starts (inclusive, i.e., last bit of flag)
+  uint8_t sh = 0;
+  int bit_index = 0;
+
+  auto get_bit_msb = [&](int bi) -> uint8_t {
+    int byte_i = bi >> 3;
+    int bit_i  = bi & 7;
+    if ((size_t)byte_i >= rx.size()) return 0;
+    return (rx[byte_i] >> (7 - bit_i)) & 1u;
+  };
+
+  for (bit_index = 0; bit_index < (int)rx.size() * 8; bit_index++) {
+    sh = (uint8_t)((sh << 1) | get_bit_msb(bit_index));
+    if (sh == FLAG_BYTE) {
+      if (first_flag_end_bit < 0) {
+        first_flag_end_bit = bit_index;
+        sh = 0;
+      } else {
+        second_flag_start_bit = bit_index;
+        break;
+      }
+    }
+  }
+
+  if (first_flag_end_bit < 0 || second_flag_start_bit < 0) return false;
+
+  int data_start_bit = first_flag_end_bit + 1;
+  int data_end_bit_exclusive = second_flag_start_bit - 7;
+
+  if (data_end_bit_exclusive <= data_start_bit) return false;
+
+  const size_t want_bytes = payload_len + 4;
+  std::vector<uint8_t> out(want_bytes, 0);
+
+  size_t out_bitpos = 0;
+  int ones = 0;
+
+  for (int bi = data_start_bit; bi < data_end_bit_exclusive && out_bitpos < want_bytes * 8; bi++) {
+    uint8_t bit = get_bit_msb(bi);
+
+    if (ones == 5) {
+      if (bit != 0) {
+        return false;
+      }
+      ones = 0;
+      continue;
+    }
+
+    size_t byte_i = out_bitpos >> 3;
+    size_t bit_i  = out_bitpos & 7;
+    if (bit) out[byte_i] |= (uint8_t)(1u << (7 - bit_i));
+    out_bitpos++;
+
+    if (bit) ones++;
+    else ones = 0;
+  }
+
+  if (out_bitpos < want_bytes * 8) return false;
+
+  uint32_t crc_rx = u32_le_bytes(out.data() + payload_len);
+  uint32_t crc_ok = crc32_ieee(out.data(), payload_len);
+  if (crc_rx != crc_ok) return false;
+
+  payload_out.assign(out.begin(), out.begin() + (ptrdiff_t)payload_len);
+  return true;
+}
 
 #pragma pack(push, 1)
 struct Power {
@@ -29,10 +132,11 @@ struct Power {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct Motor {
+struct Driver {
   uint32_t ts;
   float throttle;
-  float velocity;
+  float brake;
+  float turn_angle;
 };
 #pragma pack(pop)
 
@@ -53,9 +157,9 @@ struct GPS {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct SensorSnapshot { // 12 * 5 = 60 bytes
+struct SensorSnapshot { // 12 * 4 + 16 = 64 bytes
   Power power_snap;
-  Motor motor_snap;
+  Driver driver_snap;
   RPM rpm_snap_front;
   RPM rpm_snap_back;
   GPS gps_snap; // TODO
@@ -63,7 +167,7 @@ struct SensorSnapshot { // 12 * 5 = 60 bytes
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct SharedBlock { // 64 bytes
+struct SharedBlock { // 68 bytes
   std::atomic<uint32_t> seq;
   SensorSnapshot data;
 };
@@ -73,11 +177,11 @@ static_assert(sizeof(std::atomic<uint32_t>) == 4, "atomic<uint32_t> must be 4 by
 static_assert(offsetof(SharedBlock, seq) == 0, "seq must be at offset 0");
 static_assert(offsetof(SharedBlock, data) == 4, "data must start immediately after seq");
 static_assert(sizeof(Power) == 12);
-static_assert(sizeof(Motor) == 12);
+static_assert(sizeof(Driver) == 16);
 static_assert(sizeof(RPM) == 12);
 static_assert(sizeof(GPS) == 12);
-static_assert(sizeof(SensorSnapshot) == 60);
-static_assert(sizeof(SharedBlock) == 64);
+static_assert(sizeof(SensorSnapshot) == 64);
+static_assert(sizeof(SharedBlock) == 68);
 
 static constexpr const char* SHM_NAME = "/sensor_shm";
 
@@ -153,7 +257,7 @@ private:
   SharedBlock* shm_{nullptr};
 
   std::vector<uint8_t> power_buffer = std::vector<uint8_t>(sizeof(Power), 0x00);
-  std::vector<uint8_t> motor_buffer = std::vector<uint8_t>(sizeof(Motor), 0x00);
+  std::vector<uint8_t> driver_buffer = std::vector<uint8_t>(sizeof(Driver), 0x00);
   std::vector<uint8_t> rpm_buffer_front = std::vector<uint8_t>(sizeof(RPM), 0x00);
   std::vector<uint8_t> rpm_buffer_back = std::vector<uint8_t>(sizeof(RPM), 0x00);
   // std::vector<uint8_t> gps_buffer = std::vector<uint8_t>(sizeof(GPS), 0x00);
@@ -228,16 +332,16 @@ private:
     }
   }
 
-  std::vector<uint8_t> readData(int chipSelect, int len) {
+  std::vector<uint8_t> readFramePayload(int chipSelect, size_t payload_len) {
     select_cs(chipSelect);
 
-    std::vector<uint8_t> tx(len, 0x00);
-    std::vector<uint8_t> rx(len, 0x00);
+    std::vector<uint8_t> tx(SPI_READ_MAX, 0x00);
+    std::vector<uint8_t> rx(SPI_READ_MAX, 0x00);
 
     spi_ioc_transfer t{};
     t.tx_buf = reinterpret_cast<unsigned long>(tx.data());
     t.rx_buf = reinterpret_cast<unsigned long>(rx.data());
-    t.len = static_cast<uint32_t>(len);
+    t.len = static_cast<uint32_t>(rx.size());
     t.speed_hz = SPI_SPEED;
     t.bits_per_word = 8;
 
@@ -246,60 +350,58 @@ private:
     }
 
     deselect_all_cs();
-    return rx;
-  }
 
-  static inline uint32_t u32_be(const std::vector<uint8_t>& b, size_t off) {
-    return (static_cast<uint32_t>(b[off + 0]) << 24) |
-          (static_cast<uint32_t>(b[off + 1]) << 16) |
-          (static_cast<uint32_t>(b[off + 2]) <<  8) |
-          (static_cast<uint32_t>(b[off + 3])      );
+    std::vector<uint8_t> payload;
+    if (!decode_hdlc_frame(rx, payload_len, payload)) {
+      payload.clear();
+    }
+    return payload;
   }
-
-  static inline float f32_le(const std::vector<uint8_t>& b, size_t off) {
-    uint32_t bits = (static_cast<uint32_t>(b[off + 3]) << 24) |
-                    (static_cast<uint32_t>(b[off + 2]) << 16) |
-                    (static_cast<uint32_t>(b[off + 1]) <<  8) |
-                    (static_cast<uint32_t>(b[off + 0])      );
-    float out;
-    std::memcpy(&out, &bits, sizeof(out));
-    return out;
-  }
-
 
   void timer_callback() {
-    power_buffer = readData(1, sizeof(Power));
-    motor_buffer = readData(2, sizeof(Motor));
-    rpm_buffer_front = readData(3, sizeof(RPM));
-    rpm_buffer_back = readData(4, sizeof(RPM));
+    auto power_p = readFramePayload(1, sizeof(Power));   // 12
+    auto driver_p = readFramePayload(2, sizeof(Driver)); // 16
+    auto rpm_f_p  = readFramePayload(3, sizeof(RPM));    // 12
+    auto rpm_b_p  = readFramePayload(4, sizeof(RPM));    // 12
 
     SensorSnapshot snap{};
 
-    // This is evil but I think Erica's current SPI slaves use BE for timestamps and LE for floats
-    snap.power_snap.ts      = u32_be(power_buffer, 0);
-    snap.power_snap.current = f32_le(power_buffer, 4);
-    snap.power_snap.voltage = f32_le(power_buffer, 8);
+    if (power_p.size() == sizeof(Power)) {
+      const uint8_t* p = power_p.data();
+      snap.power_snap.ts      = u32_le_bytes(p + 0);
+      snap.power_snap.current = f32_le_bytes(p + 4);
+      snap.power_snap.voltage = f32_le_bytes(p + 8);
+    }
 
-    snap.motor_snap.ts       = u32_be(motor_buffer, 0);
-    snap.motor_snap.throttle = f32_le(motor_buffer, 4);
-    snap.motor_snap.velocity = f32_le(motor_buffer, 8);
+    if (driver_p.size() == sizeof(Driver)) {
+      const uint8_t* p = driver_p.data();
+      snap.driver_snap.ts         = u32_le_bytes(p + 0);
+      snap.driver_snap.throttle   = f32_le_bytes(p + 4);
+      snap.driver_snap.brake      = f32_le_bytes(p + 8);
+      snap.driver_snap.turn_angle = f32_le_bytes(p + 12);
+    }
 
-    snap.rpm_snap_front.ts        = u32_be(rpm_buffer_front, 0);
-    snap.rpm_snap_front.rpm_left  = f32_le(rpm_buffer_front, 4);
-    snap.rpm_snap_front.rpm_right = f32_le(rpm_buffer_front, 8);
+    if (rpm_f_p.size() == sizeof(RPM)) {
+      const uint8_t* p = rpm_f_p.data();
+      snap.rpm_snap_front.ts        = u32_le_bytes(p + 0);
+      snap.rpm_snap_front.rpm_left  = f32_le_bytes(p + 4);
+      snap.rpm_snap_front.rpm_right = f32_le_bytes(p + 8);
+    }
 
-    snap.rpm_snap_back.ts        = u32_be(rpm_buffer_back, 0);
-    snap.rpm_snap_back.rpm_left  = f32_le(rpm_buffer_back, 4);
-    snap.rpm_snap_back.rpm_right = f32_le(rpm_buffer_back, 8);
+    if (rpm_b_p.size() == sizeof(RPM)) {
+      const uint8_t* p = rpm_b_p.data();
+      snap.rpm_snap_back.ts        = u32_le_bytes(p + 0);
+      snap.rpm_snap_back.rpm_left  = f32_le_bytes(p + 4);
+      snap.rpm_snap_back.rpm_right = f32_le_bytes(p + 8);
+    }
 
-    // GPS (until implemented)
     snap.gps_snap.ts = 0;
     snap.gps_snap.gps_lat = 0.0f;
     snap.gps_snap.gps_long = 0.0f;
 
     write_snapshot(snap);
   }
-};
+
 
 int main() {
   std::signal(SIGINT, handle_sigint);

@@ -17,25 +17,26 @@ Script should be continuously updated hook up more sensors.
         "current": float,     # read_snapshot()[1][1]
         "voltage": float,     # read_snapshot()[1][2]
     },
-    "motor": { # TODO: Change this to throttle % and brake %, rename to "inputs"
+    "driver": { 
         "ts": int,            # read_snapshot()[1][3]
         "throttle": float,    # read_snapshot()[1][4]
         "velocity": float,    # read_snapshot()[1][5]
+        "turn_angle": float,  # read_snapshot()[1][6]
     },
     "rpm_front": {
-        "ts": int,            # read_snapshot()[1][6]
-        "rpm_left": float,    # read_snapshot()[1][7]
-        "rpm_right": float,   # read_snapshot()[1][8]
+        "ts": int,            # read_snapshot()[1][7]
+        "rpm_left": float,    # read_snapshot()[1][8]
+        "rpm_right": float,   # read_snapshot()[1][9]
     },
     "rpm_back": {
-        "ts": int,            # read_snapshot()[1][9]
-        "rpm_left": float,    # read_snapshot()[1][10]
-        "rpm_right": float,   # read_snapshot()[1][11]
+        "ts": int,            # read_snapshot()[1][10]
+        "rpm_left": float,    # read_snapshot()[1][11]
+        "rpm_right": float,   # read_snapshot()[1][12]
     },
     "gps": {                  # Currently Unimplemented
-        "ts": int,            # read_snapshot()[1][12]
-        "lat": float,         # read_snapshot()[1][13]
-        "long": float,        # read_snapshot()[1][14]
+        "ts": int,            # read_snapshot()[1][13]
+        "lat": float,         # read_snapshot()[1][14]
+        "long": float,        # read_snapshot()[1][15]
     },
 }
 ```

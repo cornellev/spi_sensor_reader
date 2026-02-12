@@ -9,11 +9,11 @@ Import this file to read from shared memory
 SHM_NAME = "sensor_shm"
 
 SENSOR_FMT = "<" + (
-    "I" + "f" + "f" +   # power
-    "I" + "f" + "f" +   # motor
-    "I" + "f" + "f" +   # rpm_front
-    "I" + "f" + "f" +   # rpm_back
-    "I" + "f" + "f"     # gps
+    "I" + "f" + "f" +        # power
+    "I" + "f" + "f" + "f" +  # driver
+    "I" + "f" + "f" +        # rpm_front
+    "I" + "f" + "f" +        # rpm_back
+    "I" + "f" + "f"          # gps
 )
 SENSOR_SIZE = struct.calcsize(SENSOR_FMT)
 
@@ -92,10 +92,10 @@ class SensorShmReader:
         return {
             "seq": seq,
             "power": {"ts": d[0],  "current": d[1],  "voltage": d[2]},
-            "motor": {"ts": d[3],  "throttle": d[4], "velocity": d[5]},
-            "rpm_front": {"ts": d[6], "rpm_left": d[7], "rpm_right": d[8]},
-            "rpm_back": {"ts": d[9], "rpm_left": d[10], "rpm_right": d[11]},
-            "gps": {"ts": d[12], "gps_lat": d[13], "gps_long": d[14]},
+            "driver": {"ts": d[3], "throttle": d[4], "brake": d[5], "turn_angle": d[6]},
+            "rpm_front": {"ts": d[7], "rpm_left": d[8], "rpm_right": d[9]},
+            "rpm_back": {"ts": d[10], "rpm_left": d[11], "rpm_right": d[12]},
+            "gps": {"ts": d[13], "gps_lat": d[14], "gps_long": d[15]},
         }
 
 def main():
@@ -117,4 +117,3 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
