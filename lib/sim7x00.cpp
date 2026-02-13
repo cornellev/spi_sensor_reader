@@ -236,6 +236,44 @@ char Sim7x00::sendATcommand(const char* ATcommand, const char* expected_answer, 
 	return answer;
 }
 
+char Sim7x00::sendATcommand(const char* ATcommand, const char* expected_answer, char* response, unsigned int timeout) {
+
+	char x = 0, answer = 0;
+	unsigned long previous;
+
+	memset(response, '\0', 100);    // Initialize the string
+
+	delay(100);
+
+	while (Serial.available() > 0) Serial.read();    // Clean the input buffer
+
+	Serial.println(ATcommand);    // Send the AT command 
+
+
+	x = 0;
+	previous = millis();
+
+	// this loop waits for the answer
+	do {
+		if (Serial.available() != 0) {
+			// if there are data in the UART input buffer, reads it and checks for the asnwer
+			response[x] = Serial.read();
+			printf("%c", response[x]);
+			x++;
+			// check if the desired answer  is in the response of the module
+			if (strstr(response, expected_answer) != NULL)
+			{
+				printf("\n");
+				answer = 1;
+			}
+		}
+	}
+	// Waits for the asnwer with time out
+	while ((answer == 0) && ((millis() - previous) < timeout));
+
+	return answer;
+}
+
 char Sim7x00::sendATcommand2(const char* ATcommand, const char* expected_answer1, const char* expected_answer2, unsigned int timeout){
 	uint8_t x=0,  answer=0;
     char response[100];

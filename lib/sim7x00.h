@@ -66,6 +66,7 @@ public:
 	// Other functions.
 	char sendATcommand(const char* ATcommand, unsigned int timeout);
 	char sendATcommand(const char* ATcommand, const char* expected_answer, unsigned int timeout);
+	char sendATcommand(const char* ATcommand, const char* expected_answer, char* response, unsigned int timeout);
 	char sendATcommand2(const char* ATcommand, const char* expected_answer1, const char* expected_answer2, unsigned int timeout);
 };
 

@@ -342,10 +342,12 @@ private:
   bool poll_gps_once(GPS& out) {
     if (!gps_started_) return false;
 
-    if (sim7600.sendATcommand("AT+CGPSINFO", "+CGPSINFO:", 500) != 1) {
+    char buf[100];	
+
+    if (sim7600.sendATcommand("AT+CGPSINFO", "+CGPSINFO:", buf, 500) != 1) {
       return false;
     }
-
+/*
     // Read remainder for a bounded time window
     std::string buf;
     buf.reserve(256);
@@ -365,8 +367,11 @@ private:
     std::string line = buf.substr(p);
     if (line.find(",,,,") != std::string::npos) return false; // no fix / empty
 
+    */
     char lat_s[16]{}, lon_s[16]{};
     char ns = 0, ew = 0;
+
+    std::string line = buf;
 
     if (sscanf(line.c_str(), "+CGPSINFO: %15[^,],%c,%15[^,],%c", lat_s, &ns, lon_s, &ew) != 4) {
       return false;
