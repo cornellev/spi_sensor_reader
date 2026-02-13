@@ -29,6 +29,14 @@
 #include "sim7x00.h"
 #include "arduPi.h"
 
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <cstddef>
+#include <cstdlib>
+
+
+
 Sim7x00::Sim7x00(){
 }
 
@@ -232,6 +240,7 @@ char Sim7x00::sendATcommand(const char* ATcommand, const char* expected_answer, 
 	}
 	// Waits for the asnwer with time out
 	while ((answer == 0) && ((millis() - previous) < timeout));
+
 
 	return answer;
 }

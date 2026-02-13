@@ -17,6 +17,7 @@
 #include <ctime>
 #include <string>
 #include <thread>
+#include <iostream>
 
 #include "lib/sim7x00.h"
 #include "lib/arduPi.h"
@@ -342,12 +343,10 @@ private:
   bool poll_gps_once(GPS& out) {
     if (!gps_started_) return false;
 
-    char buf[100];	
 
-    if (sim7600.sendATcommand("AT+CGPSINFO", "+CGPSINFO:", buf, 500) != 1) {
+    if (sim7600.sendATcommand("AT+CGPSINFO", "+CGPSINFO:", 500) != 1) {
       return false;
     }
-/*
     // Read remainder for a bounded time window
     std::string buf;
     buf.reserve(256);
@@ -361,19 +360,17 @@ private:
       usleep(2000);
     }
 
-    auto p = buf.find("+CGPSINFO:");
-    if (p == std::string::npos) return false;
+    std::cout << buf << std::endl;
 
-    std::string line = buf.substr(p);
-    if (line.find(",,,,") != std::string::npos) return false; // no fix / empty
+    if (buf.find(",,,,") != std::string::npos) return false; // no fix / empty
 
-    */
+    std::cout << "c2" << std::endl;
+
     char lat_s[16]{}, lon_s[16]{};
     char ns = 0, ew = 0;
 
-    std::string line = buf;
-
-    if (sscanf(line.c_str(), "+CGPSINFO: %15[^,],%c,%15[^,],%c", lat_s, &ns, lon_s, &ew) != 4) {
+    if (sscanf(buf.c_str(), "%15[^,],%c,%15[^,],%c", lat_s, &ns, lon_s, &ew) != 4) {
+	std::cout << "daniel cant parse data lol" << std::endl;
       return false;
     }
 

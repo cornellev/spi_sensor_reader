@@ -28,6 +28,12 @@
 #ifndef sim7x00_h
 #define sim7x00_h
 
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <cstddef>
+
+
 /* Sim7x00 Class */
 class Sim7x00 {
 
