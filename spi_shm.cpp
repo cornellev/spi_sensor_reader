@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <vector>
 #include <csignal>
@@ -22,6 +23,8 @@ constexpr uint32_t SPI_SPEED = 1000000;    // 1 MHz
 constexpr const char* SPI_DEVICE = "/dev/spidev0.0";
 
 static constexpr int CS_PINS[4] = {22, 23, 24, 25};
+
+constexpr float NANF = (std::nanf("1"));
 
 static uint32_t crc32_ieee(const uint8_t* data, size_t len) {
   uint32_t crc = 0xFFFFFFFFu;
@@ -358,15 +361,7 @@ private:
     deselect_all_cs();
 
     std::vector<uint8_t> payload;
-    if (!decode_hdlc_frame(rx, payload_len, payload)) {
-      
-      if (chipSelect == 1) { // For debugging, we only use Power
-        errcount++;
-        std::fprintf(stderr, "Failed to decode HDLC frame from CS%d, errcount %d\n", chipSelect, errcount);
-      }
-
-      payload.clear();
-    }
+    decode_hdlc_frame(rx, payload_len, payload);
     return payload;
   }
 
@@ -383,6 +378,14 @@ private:
       snap.power_snap.ts      = u32_le_bytes(p + 0);
       snap.power_snap.current = f32_le_bytes(p + 4);
       snap.power_snap.voltage = f32_le_bytes(p + 8);
+    } else {
+      // For debugging, we only use Power for now
+      errcount++;
+      std::fprintf(stderr, "Failed to read Power frame, errcount %d\n", errcount);
+
+      snap.power_snap.ts = 0;
+      snap.power_snap.current = NANF;
+      snap.power_snap.voltage = NANF;
     }
 
     if (driver_p.size() == sizeof(Driver)) {
@@ -391,6 +394,11 @@ private:
       snap.driver_snap.throttle   = f32_le_bytes(p + 4);
       snap.driver_snap.brake      = f32_le_bytes(p + 8);
       snap.driver_snap.turn_angle = f32_le_bytes(p + 12);
+    } else {
+      snap.driver_snap.ts = 0;
+      snap.driver_snap.throttle = NANF;
+      snap.driver_snap.brake = NANF;
+      snap.driver_snap.turn_angle = NANF;
     }
 
     if (rpm_f_p.size() == sizeof(RPM)) {
@@ -398,6 +406,10 @@ private:
       snap.rpm_snap_front.ts        = u32_le_bytes(p + 0);
       snap.rpm_snap_front.rpm_left  = f32_le_bytes(p + 4);
       snap.rpm_snap_front.rpm_right = f32_le_bytes(p + 8);
+    } else {
+      snap.rpm_snap_front.ts = 0;
+      snap.rpm_snap_front.rpm_left = NANF;
+      snap.rpm_snap_front.rpm_right = NANF;
     }
 
     if (rpm_b_p.size() == sizeof(RPM)) {
@@ -405,11 +417,16 @@ private:
       snap.rpm_snap_back.ts        = u32_le_bytes(p + 0);
       snap.rpm_snap_back.rpm_left  = f32_le_bytes(p + 4);
       snap.rpm_snap_back.rpm_right = f32_le_bytes(p + 8);
+    } else {
+      snap.rpm_snap_back.ts = 0;
+      snap.rpm_snap_back.rpm_left = NANF;
+      snap.rpm_snap_back.rpm_right = NANF;
     }
 
+    // to merge soon
     snap.gps_snap.ts = 0;
-    snap.gps_snap.gps_lat = 0.0f;
-    snap.gps_snap.gps_long = 0.0f;
+    snap.gps_snap.gps_lat = NANF;
+    snap.gps_snap.gps_long = NANF;
 
     write_snapshot(snap);
   }
