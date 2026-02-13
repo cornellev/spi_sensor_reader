@@ -357,7 +357,7 @@ private:
     std::vector<uint8_t> payload;
     if (!decode_hdlc_frame(rx, payload_len, payload)) {
       if (chipSelect == 1) { // For debugging, we only use Power
-        std::fprintf(stderr, "Failed to decode HDLC frame from CS%d\n", chipSelect);
+        std::fprintf(stderr, "Failed to decode HDLC frame from CS%d at time %d\n", chipSelect, (int)time(nullptr));
       }
       payload.clear();
     }
