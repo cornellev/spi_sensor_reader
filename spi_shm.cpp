@@ -406,7 +406,7 @@ private:
     write_snapshot(snap);
   }
 
-}
+};
 
 
 int main() {
