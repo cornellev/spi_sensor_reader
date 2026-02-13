@@ -12,6 +12,7 @@
 #include <vector>
 #include <csignal>
 #include <cstddef>
+#include <chrono>
 
 static constexpr uint8_t  FLAG_BYTE = 0x7E;
 static constexpr int SPI_READ_MAX = 64;    // bytes clocked per transaction (>= worst-case frame)
@@ -259,6 +260,8 @@ private:
   int shm_fd_{-1};
   SharedBlock* shm_{nullptr};
 
+  int errcount = 0;
+
   std::vector<uint8_t> power_buffer = std::vector<uint8_t>(sizeof(Power), 0x00);
   std::vector<uint8_t> driver_buffer = std::vector<uint8_t>(sizeof(Driver), 0x00);
   std::vector<uint8_t> rpm_buffer_front = std::vector<uint8_t>(sizeof(RPM), 0x00);
@@ -356,9 +359,12 @@ private:
 
     std::vector<uint8_t> payload;
     if (!decode_hdlc_frame(rx, payload_len, payload)) {
+      errcount++;
+
       if (chipSelect == 1) { // For debugging, we only use Power
-        std::fprintf(stderr, "Failed to decode HDLC frame from CS%d at time %d\n", chipSelect, (int)time(nullptr));
+        std::fprintf(stderr, "Failed to decode HDLC frame from CS%d, errcount %d\n", chipSelect, errcount);
       }
+
       payload.clear();
     }
     return payload;
