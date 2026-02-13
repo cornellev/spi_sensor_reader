@@ -53,7 +53,10 @@ static bool decode_hdlc_frame(const std::vector<uint8_t>& rx,
                               std::vector<uint8_t>& payload_out)
 {
   payload_out.clear();
-  if (payload_len == 0) return false;
+  if (payload_len == 0) {
+    return false;
+  }
+  
 
   int first_flag_end_bit = -1;  // bit index where first flag ends (inclusive)
   int second_flag_start_bit = -1; // bit index where second flag starts (inclusive, i.e., last bit of flag)
@@ -353,6 +356,7 @@ private:
 
     std::vector<uint8_t> payload;
     if (!decode_hdlc_frame(rx, payload_len, payload)) {
+      std::fprintf(stderr, "Failed to decode HDLC frame from CS%d\n", chipSelect);
       payload.clear();
     }
     return payload;
