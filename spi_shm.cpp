@@ -406,6 +406,8 @@ private:
     write_snapshot(snap);
   }
 
+}
+
 
 int main() {
   std::signal(SIGINT, handle_sigint);
