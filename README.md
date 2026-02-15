@@ -59,7 +59,7 @@ HDLC-framed packets over SPI.
     -o shm_writer
 
     sudo pigpiod
-    sudo ./shm_writer
+    ./shm_writer
    ```
    (keep this running in one terminal — Ctrl+C to stop cleanly)
  
