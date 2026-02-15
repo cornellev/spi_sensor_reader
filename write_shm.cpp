@@ -181,7 +181,7 @@ struct SensorSnapshot { // 12 * 4 + 16 = 64 bytes
   Driver driver_snap;
   RPM rpm_snap_front;
   RPM rpm_snap_back;
-  GPS gps_snap; // TODO
+  GPS gps_snap;
 };
 #pragma pack(pop)
 
