@@ -65,7 +65,7 @@ static int uart_handle = -1;
 void SerialPi::begin(unsigned baud)
 {
     ensure_pigpio();
-    uart_handle = serial_open(pigpio_handle, "/dev/serial0", baud, 0);
+    uart_handle = serial_open(pigpio_handle, const_cast<char*>("/dev/serial0"), baud, 0);
     if (uart_handle < 0) {
         std::perror("serial_open failed");
     }
@@ -93,7 +93,7 @@ void SerialPi::println(const char* s)
 {
     if (uart_handle < 0) return;
     serial_write(pigpio_handle, uart_handle, const_cast<char*>(s), strlen(s));
-    serial_write(pigpio_handle, uart_handle, "\r\n", 2);
+    serial_write(pigpio_handle, uart_handle, const_cast<char*>("\r\n"), 2);
 }
 
 /* Global instance */

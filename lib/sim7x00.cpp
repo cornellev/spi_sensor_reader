@@ -83,7 +83,8 @@ bool Sim7x00::GPSPositioning(){
     bool RecNull = true;
 	int i = 0;
 	char RecMessage[200];
-    char LatDD[2],LatMM[9],LogDD[3],LogMM[9],DdMmYy[6] ,UTCTime[6];
+    char LatDD[3], LatMM[10], LogDD[4], LogMM[10], DdMmYy[7], UTCTime[7];
+
     int DayMonthYear;
     float Lat,Log;
 
@@ -144,8 +145,8 @@ bool Sim7x00::GPSPositioning(){
 
     }
 
-    strncpy(LatDD,RecMessage,2);
-    strncpy(LatMM,RecMessage+2,9);
+    strncpy(LatDD, RecMessage, 2); LatDD[2] = '\0';
+    strncpy(LatMM, RecMessage + 2, 9); LatMM[9] = '\0';
     Lat = atoi(LatDD) + (atof(LatMM)/60);
     if(RecMessage[12] == 'N')
         printf("Latitude is %f N\n",Lat);
@@ -154,8 +155,8 @@ bool Sim7x00::GPSPositioning(){
     else
         return false;
 
-    strncpy(LogDD,RecMessage+14,3);
-    strncpy(LogMM,RecMessage+17,9);
+    strncpy(LogDD, RecMessage + 14, 3); LogDD[3] = '\0';
+    strncpy(LogMM, RecMessage + 17, 9); LogMM[9] = '\0';
     Log = atoi(LogDD) + (atof(LogMM)/60);
     if(RecMessage[27] == 'E')
         printf("Longitude is %f E\n",Log);
@@ -164,11 +165,11 @@ bool Sim7x00::GPSPositioning(){
     else
         return false;
 
-    strncpy(DdMmYy,RecMessage+29,6);
+    strncpy(DdMmYy, RecMessage + 29, 6);
     DdMmYy[6] = '\0';
     printf("Day Month Year is %s\n",DdMmYy);
 
-    strncpy(UTCTime,RecMessage+36,6);
+    strncpy(UTCTime, RecMessage + 36, 6);
     UTCTime[6] = '\0';
     printf("UTC time is %s\n",UTCTime);
 
