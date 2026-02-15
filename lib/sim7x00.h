@@ -28,6 +28,12 @@
 #ifndef sim7x00_h
 #define sim7x00_h
 
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <cstddef>
+
+
 /* Sim7x00 Class */
 class Sim7x00 {
 
@@ -66,6 +72,7 @@ public:
 	// Other functions.
 	char sendATcommand(const char* ATcommand, unsigned int timeout);
 	char sendATcommand(const char* ATcommand, const char* expected_answer, unsigned int timeout);
+	char sendATcommand(const char* ATcommand, const char* expected_answer, char* response, unsigned int timeout);
 	char sendATcommand2(const char* ATcommand, const char* expected_answer1, const char* expected_answer2, unsigned int timeout);
 };
 
