@@ -1,7 +1,3 @@
-/* =========================
-   TELEMETRY CONFIGURATION
-   ========================= */
-
 // 1 = fake, 0 = real ADC
 #define USE_FAKE_DATA   1   
 
@@ -18,7 +14,3 @@
 // ADC parameters (probably should leave alone)
 #define ADC_VREF        3.3f
 #define ADC_COUNTS_MAX  4095.0f
-
-/* =========================
-   END CONFIG
-   ========================= */
