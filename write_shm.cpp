@@ -13,10 +13,8 @@
 #include <vector>
 #include <csignal>
 #include <cstddef>
-#include <chrono>
 #include <thread>
 #include <string>
-#include <iostream>
 
 #include "lib/sim7x00.h"
 #include "lib/arduPi.h"
@@ -462,7 +460,7 @@ private:
     char ns = 0, ew = 0;
 
     if (sscanf(buf.c_str(), "%15[^,],%c,%15[^,],%c", lat_s, &ns, lon_s, &ew) != 4) {
-	    std::cout << "daniel cant parse data lol" << std::endl; // insubordinate debug statement
+	    std::printf("daniel cant parse data lol\n"); // insubordinate debug statement
       return false;
     }
 
