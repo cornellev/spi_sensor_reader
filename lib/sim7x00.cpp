@@ -117,7 +117,7 @@ bool Sim7x00::GPSPositioning(){
             
             RecMessage[i] = '\0';
             
-            printf("%s\n",RecMessage); 
+            // printf("%s\n",RecMessage); 
 
 
             if (strstr(RecMessage, ",,,,,,,,") != NULL) 
@@ -268,12 +268,12 @@ char Sim7x00::sendATcommand(const char* ATcommand, const char* expected_answer, 
 		if (Serial.available() != 0) {
 			// if there are data in the UART input buffer, reads it and checks for the asnwer
 			response[x] = Serial.read();
-			printf("%c", response[x]);
+			// printf("%c", response[x]);
 			x++;
 			// check if the desired answer  is in the response of the module
 			if (strstr(response, expected_answer) != NULL)
 			{
-				printf("\n");
+				// printf("\n");
 				answer = 1;
 			}
 		}
@@ -305,18 +305,18 @@ char Sim7x00::sendATcommand2(const char* ATcommand, const char* expected_answer1
         // if there are data in the UART input buffer, reads it and checks for the asnwer
         if(Serial.available() != 0){    
             response[x] = Serial.read();
-            printf("%c",response[x]);
+            // printf("%c",response[x]);
             x++;
             // check if the desired answer 1  is in the response of the module
             if (strstr(response, expected_answer1) != NULL)    
             {
-				printf("\n");
+				// printf("\n");
                 answer = 1;
             }
             // check if the desired answer 2 is in the response of the module
             else if (strstr(response, expected_answer2) != NULL)    
             {
-				printf("\n");
+				// printf("\n");
                 answer = 2;
             }
         }
