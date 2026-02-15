@@ -452,11 +452,11 @@ private:
       usleep(2000);
     }
 
-    std::cout << buf << std::endl;
+    // std::cout << buf << std::endl;
 
     if (buf.find(",,,,") != std::string::npos) return false; // no fix / empty
 
-    std::cout << "c2" << std::endl;
+    // std::cout << "c2" << std::endl;
 
     char lat_s[16]{}, lon_s[16]{};
     char ns = 0, ew = 0;

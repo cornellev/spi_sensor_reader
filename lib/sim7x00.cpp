@@ -42,7 +42,6 @@ void Sim7x00::PowerOn(int PowerKey /*= powerkey*/) {
     uint8_t answer = 0;
 
     Serial.begin(115200);
-    sendATcommand("ATE0", "OK", 1000);
 
     // checks if the module is started
     answer = sendATcommand("AT", "OK", 2000);
@@ -136,10 +135,6 @@ bool Sim7x00::GPSPositioning() {
 
         delay(1500);
     }
-
-    // NOTE: This parsing assumes the payload begins immediately with latitude digits,
-    // which may not be true if RecMessage still contains "+CGPSINFO: " or CRLF.
-    // Keeping your original parsing structure, but with safe buffers:
 
     strncpy(LatDD, RecMessage, 2);     LatDD[2] = '\0';
     strncpy(LatMM, RecMessage + 2, 9); LatMM[9] = '\0';
