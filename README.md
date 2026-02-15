@@ -9,8 +9,9 @@ lock-free using a sequence lock.
 
 The system is designed to be extended as additional sensors are brought online.
 
-Also includes `spi_slave.c` to make embedded a bit easier for the team. Will update
-this for easy ADC sensor integration soon.
+This repository also includes a minimal RP2040 SPI slave firmware
+(`pico-firmware/spi_slave.c`) that transmits reads analog sensor data and sends as
+HDLC-framed packets over SPI.
 
 ---
 
@@ -81,9 +82,9 @@ this for easy ADC sensor integration soon.
         reader.close()
     ```
 
-## Hardware
+## Electrical Section
 
-Current SPI setup (for Electrical reference):
+Proposed SPI setup for UC26:
 
 | CS GPIO | Description          | Format                     |
 |---------|----------------------|----------------------------|
@@ -93,3 +94,42 @@ Current SPI setup (for Electrical reference):
 | 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
 
 Bus: `/dev/spidev0.0`
+
+This repository also makes it easy to flash an RP2040 with custom SPI-slave firmware that
+integrates cleanly into the existing SPI polling pipeline.
+
+The Pico firmware (`pico-firmware/spi_slave.c`) acts as an SPI slave device. Whenever
+the master asserts chip-select, the Pico responds with a single HDLC-framed message
+containing a timestamp and a fixed number of ADC readings. The payload is CRC-protected
+and bit-stuffed, so it can be safely parsed by the existing HDLC decoder on the host.
+
+To add a new Pico-based sensor, you configure its ADC channels and calibration in
+`telemetry_config.h`, flash the firmware, and assign the Pico to one of the CS lines
+above. From the host’s perspective, the Pico behaves like any other SPI sensor.
+
+Suppose you want to implement the Joulemeter/Power montitor (CS GPIO 22) using a Pico with 
+two analog inputs:
+- Channel 0: current sense amplifier output
+- Channel 1: voltage divider output
+
+In `pico-firmware/telemetry_config.h`:
+
+```c
+// 1 = fake, 0 = real ADC
+#define USE_FAKE_DATA   0   
+
+// Number of channels (RP2040 supports max 4)
+#define N_CH            2
+
+// ADC GPIO pins (must be GPIO 26–29)
+#define ADC_GPIOS       { 26, 27 }
+
+// Linear conversion: value = m * volts + b
+#define CONV_M          { 1.0f, 1.0f } // I do not know the actual conversions you'll need.
+#define CONV_B          { 0.0f, 0.0f }
+
+// ADC parameters 
+#define ADC_VREF        3.3f
+#define ADC_COUNTS_MAX  4095.0f
+
+```

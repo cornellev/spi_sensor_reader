@@ -2,10 +2,14 @@
 #include <math.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/dma.h"
+#include "hardware/adc.h"
+
+#include "telemetry_config.h"
 
 #define SPI_PORT spi0
 #define PIN_RX  16
@@ -17,17 +21,37 @@
 // Flag byte (bit pattern 01111110). Master scans for this in the bitstream.
 #define FLAG_BYTE 0x7E
 
-// Payload is arbitrary bytes (we'll build: 4B timestamp + 4B * N floats).
-// You can increase this, but keep frame buffer sized accordingly.
-#define MAX_FLOATS 8
-#define MAX_PAYLOAD_BYTES  (4 + 4 * MAX_FLOATS)
+// RP2040 external ADC inputs are ADC0..ADC3 on GPIO 26..29 (4 total).
+#define MAX_CHANNELS 4
 
-// Frame buffer must hold: FLAG + stuffed(payload+crc) + FLAG.
-// Worst-case stuffing expands by about 20%. Add margin.
-#define FRAME_MAX_BYTES 128
+#if (N_CH > MAX_CHANNELS)
+#error "N_CH must be <= MAX_CHANNELS (4)."
+#endif
+#if (N_CH < 1)
+#error "N_CH must be >= 1."
+#endif
 
+// Worst-case HDLC frame size for N_CH floats:
+//   payload = 4B timestamp + 4B * N_CH
+//   crc     = 4B
+//   stuffing worst-case: +1 bit per 5 bits
+//   flags   = 2 bytes (never stuffed)
+#define FRAME_MAX_BYTES \
+({ \
+    const unsigned payload_bytes = 4u + 4u*(unsigned)N_CH; \
+    const unsigned stuffed_bits  = ((payload_bytes + 4u) * 8u * 6u + 4u) / 5u; \
+    const unsigned frame_bits    = stuffed_bits + 16u; \
+    (frame_bits + 7u) / 8u; \
+})
 uint8_t frame_buf[FRAME_MAX_BYTES];
+
 int data_chan;
+
+static inline float fake_signal_from_now(void) {
+    float now_us = (float)time_us_64();
+    float t = now_us * 1e-6f;
+    return 127.0f * sinf(t) + 127.0f;
+}
 
 inline void set_gpio_hi_z(uint pin) {
     io_bank0_hw->io[pin].ctrl =
@@ -114,17 +138,34 @@ inline int bytes_used_from_bitpos(int bitpos) {
     return (bitpos + 7) >> 3;
 }
 
-// Fake data generation (sine)
-inline float fake_signal_from_timestamp(uint32_t now_us) {
-    float t = (float)now_us * 1e-6f;
-    return 127.0f * sinf(t) + 127.0f;
+static inline float adc_counts_to_volts(uint16_t raw) {
+    return ((float)raw) * (ADC_VREF / ADC_COUNTS_MAX);
 }
 
-size_t build_payload(uint8_t *payload, size_t payload_cap, uint32_t now_us, int n_floats) {
-    if (n_floats < 0) n_floats = 0;
-    if (n_floats > MAX_FLOATS) n_floats = MAX_FLOATS;
+static float read_channel(int i) {
+    if (i < 0 || i >= N_CH) return (float)NAN;
 
-    size_t need = 4 + (size_t)(4 * n_floats);
+#if USE_FAKE_DATA
+    (void)i;
+    return fake_signal_from_now();
+#else
+    uint8_t gpio = adc_gpios[i];
+    if (gpio < 26 || gpio > 29) return (float)NAN;
+
+    // RP2040 mapping: ADC0..ADC3 correspond to GPIO 26..29
+    uint input = (uint)(gpio - 26);
+
+    adc_select_input(input);
+    (void)adc_read(); // Discard first reading after switching input per datasheet recommendation
+    uint16_t raw = adc_read();
+
+    float v = adc_counts_to_volts(raw);
+    return conv_m[i] * v + conv_b[i];
+#endif
+}
+
+size_t build_payload(uint8_t *payload, size_t payload_cap, uint32_t now_us) {
+    const size_t need = 4 + (size_t)(4 * N_CH);
     if (need > payload_cap) return 0;
 
     // LITTLE ENDIAN timestamp 
@@ -133,11 +174,9 @@ size_t build_payload(uint8_t *payload, size_t payload_cap, uint32_t now_us, int 
     payload[2] = (uint8_t)(now_us >> 16);
     payload[3] = (uint8_t)(now_us >> 24);
 
-    // TODO:
-    // Read real sensor data here
-
-    for (int i = 0; i < n_floats; i++) {
-        union { float f; uint32_t u; } x = { .f = fake_signal_from_timestamp(now_us) };
+    for (int i = 0; i < N_CH; i++) {
+        // OMG i get to use a union in C! WOW.
+        union { float f; uint32_t u; } x = { .f = read_channel(i) };
         size_t off = 4 + (size_t)(4 * i);
         payload[off + 0] = (uint8_t)(x.u >> 0);
         payload[off + 1] = (uint8_t)(x.u >> 8);
@@ -189,8 +228,7 @@ void irq_handler(uint gpio, uint32_t events)
         uint32_t now_us = (uint32_t)time_us_64();
 
         uint8_t payload[MAX_PAYLOAD_BYTES];
-        const int n_floats = 2;
-        size_t payload_len = build_payload(payload, sizeof(payload), now_us, n_floats);
+        size_t payload_len = build_payload(payload, sizeof(payload), now_us);
         if (payload_len == 0) return;
 
         int frame_len = build_frame(frame_buf, sizeof(frame_buf), payload, payload_len);
@@ -214,6 +252,14 @@ int main()
     gpio_set_dir(LED, GPIO_OUT);
     gpio_put(LED, 1);
 
+#if !USE_FAKE_DATA
+    adc_init();
+    for (int i = 0; i < N_CH; i++) {
+        // Configure GPIO for ADC (safe even if duplicated)
+        adc_gpio_init(adc_gpios[i]);
+    }
+#endif
+
     spi_init(SPI_PORT, 1000 * 1000);
     spi_set_slave(SPI_PORT, true);
 
@@ -231,7 +277,7 @@ int main()
         &irq_handler);
 
     while (true) {
-        printf("Hello, world!\n");
+        // printf("Hello, world!\n");
         sleep_ms(1000);
     }
 }
