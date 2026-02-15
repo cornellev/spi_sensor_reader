@@ -1,17 +1,18 @@
 # uc26_sensor_reader
 
-HDLC-framed SPI sensor reader → POSIX shared memory (seqlock) → Python reader.
+HDLC-framed SPI (and GPS UART) sensor reader → POSIX shared memory (seqlock) → Python reader.
 
 This repository provides a C++ daemon that polls multiple SPI devices at ~200 Hz,
-decodes HDLC-framed payloads with CRC checking, and publishes the latest sensor
-snapshot into POSIX shared memory. Consumers (e.g. Python) can read the data
-lock-free using a sequence lock.
-
-The system is designed to be extended as additional sensors are brought online.
+decodes HDLC-framed payloads with CRC checking, simultaneously reads GPS over UART 
+with the Wireshare SIM7600X HAT at 1Hz, and publishes the latest sensor snapshot into 
+POSIX shared memory. Consumers (e.g. Python) can read the data lock-free using a sequence 
+lock.
 
 This repository also includes a minimal RP2040 SPI slave firmware
 (`pico-firmware/spi_slave.c`) that transmits reads analog sensor data and sends as
 HDLC-framed packets over SPI.
+
+The system is designed to be extended as additional sensors are brought online.
 
 ---
 
@@ -41,7 +42,7 @@ HDLC-framed packets over SPI.
         "rpm_left": float,    # read_snapshot()[1][11]
         "rpm_right": float,   # read_snapshot()[1][12]
     },
-    "gps": {                  # Currently Unimplemented
+    "gps": {                  
         "ts": int,            # read_snapshot()[1][13]
         "lat": float,         # read_snapshot()[1][14]
         "long": float,        # read_snapshot()[1][15]
