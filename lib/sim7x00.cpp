@@ -197,7 +197,7 @@ char Sim7x00::sendATcommand(const char* ATcommand, unsigned int timeout) {
 		// if there are data in the UART input buffer, reads it and checks for the asnwer
 		if (Serial.available() != 0) {
 			response[x] = Serial.read();
-			printf("%c", response[x]);
+			// printf("%c", response[x]);
 			x++;
 		}
 		
@@ -229,12 +229,12 @@ char Sim7x00::sendATcommand(const char* ATcommand, const char* expected_answer, 
 		if (Serial.available() != 0) {
 			// if there are data in the UART input buffer, reads it and checks for the asnwer
 			response[x] = Serial.read();
-			printf("%c", response[x]);
+			//printf("%c", response[x]);
 			x++;
 			// check if the desired answer  is in the response of the module
 			if (strstr(response, expected_answer) != NULL)
 			{
-				printf("\n");
+				// printf("\n");
 				answer = 1;
 			}
 		}
