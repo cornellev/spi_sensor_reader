@@ -14,6 +14,14 @@
 #include <csignal>
 #include <cstddef>
 #include <chrono>
+#include <thread>
+#include <string>
+#include <iostream>
+
+#include "lib/sim7x00.h"
+#include "lib/arduPi.h"
+
+constexpr uint8_t GPS_POWERKEY = 8;
 
 static constexpr uint8_t  FLAG_BYTE = 0x7E;
 static constexpr int SPI_READ_MAX = 64;    // bytes clocked per transaction (>= worst-case frame)
@@ -25,6 +33,12 @@ constexpr const char* SPI_DEVICE = "/dev/spidev0.0";
 static constexpr int CS_PINS[4] = {22, 23, 24, 25};
 
 constexpr float NANF = (std::nanf("1"));
+
+static inline uint64_t now_us() {
+  timespec ts{};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return uint64_t(ts.tv_sec) * 1000000ULL + uint64_t(ts.tv_nsec) / 1000ULL;
+}
 
 static uint32_t crc32_ieee(const uint8_t* data, size_t len) {
   uint32_t crc = 0xFFFFFFFFu;
@@ -180,6 +194,7 @@ struct SharedBlock { // 68 bytes
 };
 #pragma pack(pop)
 
+// Asserts
 static_assert(sizeof(std::atomic<uint32_t>) == 4, "atomic<uint32_t> must be 4 bytes");
 static_assert(offsetof(SharedBlock, seq) == 0, "seq must be at offset 0");
 static_assert(offsetof(SharedBlock, data) == 4, "data must start immediately after seq");
@@ -196,9 +211,9 @@ static constexpr const char* SHM_NAME = "/sensor_shm";
 static volatile sig_atomic_t g_stop = 0;
 static void handle_sigint(int) { g_stop = 1; }
 
-class SPIMasterShm {
+class MasterShm {
 public:
-  SPIMasterShm() {
+  MasterShm() {
     pi_ = pigpio_start(nullptr, nullptr);
     if (pi_ < 0) {
       std::fprintf(stderr, "Failed to connect to pigpiod\n");
@@ -237,9 +252,18 @@ public:
     }
 
     ok_ = true;
+
+    init_gps();
   }
 
-  ~SPIMasterShm() {
+  ~MasterShm() {
+    stop_.store(true, std::memory_order_relaxed);
+    if (gps_thread_.joinable()) gps_thread_.join();
+
+    if (gps_started_) {
+      sim7600.sendATcommand("AT+CGPS=0", "OK", 2000);
+    }
+
     shutdown_shm();
     if (spi_fd_ >= 0) close(spi_fd_);
     if (pi_ >= 0) pigpio_stop(pi_);
@@ -247,10 +271,11 @@ public:
 
   bool ok() const { return ok_; }
 
-  void spin() {
+  // Spin calls timer_callback at every interval microseconds until SIGNINT.
+  void spin(int interval) {
     while (!g_stop) {
       timer_callback();
-      usleep(5000); // 200 Hz for now
+      usleep(interval);
     }
     std::fprintf(stderr, "SIGINT received, exiting...\n");
   }
@@ -264,13 +289,33 @@ private:
   SharedBlock* shm_{nullptr};
 
   int errcount = 0;
-
-  std::vector<uint8_t> power_buffer = std::vector<uint8_t>(sizeof(Power), 0x00);
-  std::vector<uint8_t> driver_buffer = std::vector<uint8_t>(sizeof(Driver), 0x00);
-  std::vector<uint8_t> rpm_buffer_front = std::vector<uint8_t>(sizeof(RPM), 0x00);
-  std::vector<uint8_t> rpm_buffer_back = std::vector<uint8_t>(sizeof(RPM), 0x00);
-  // std::vector<uint8_t> gps_buffer = std::vector<uint8_t>(sizeof(GPS), 0x00);
   
+  // GPS thread 
+  std::atomic<uint32_t> gps_seq_{0};
+  GPS gps_cache_{};
+  std::thread gps_thread_;
+  std::atomic<bool> stop_{false};
+  bool gps_started_{false};
+
+  void init_gps() {
+    sim7600.PowerOn(GPS_POWERKEY);
+
+    if (sim7600.sendATcommand("AT+CGPS=1,1", "OK", 2000) == 1) {
+      gps_started_ = true;
+      std::fprintf(stderr, "GPS started\n");
+    } else {
+      std::fprintf(stderr, "GPS failed to start\n");
+    }
+
+    GPS g{};
+    g.ts = 0;
+    g.gps_lat  = NANF;
+    g.gps_long = NANF;
+    publish_gps(g);
+
+    gps_thread_ = std::thread([this]() { this->gps_loop(); });
+  }
+
   bool init_shm() {
     shm_fd_ = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd_ < 0) { std::perror("shm_open"); return false; }
@@ -311,6 +356,7 @@ private:
     shm_unlink(SHM_NAME);
   }
 
+  // Writes snap to shared memory with a simple sequence lock for synchronization.
   inline void write_snapshot(const SensorSnapshot& snap) {
     if (!shm_) return;
     uint32_t s = shm_->seq.load(std::memory_order_relaxed);
@@ -319,15 +365,16 @@ private:
     shm_->seq.store(s + 2, std::memory_order_release); // even => stable
   }
 
-  static float unpack_float(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3) {
-    uint32_t bits = (static_cast<uint32_t>(b3) << 24) |
-                    (static_cast<uint32_t>(b2) << 16) |
-                    (static_cast<uint32_t>(b1) <<  8) |
-                    (static_cast<uint32_t>(b0));
-    float result;
-    std::memcpy(&result, &bits, sizeof(result));
-    return result;
-  }
+  // Currently unused float unpacking helper
+  // static float unpack_float(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3) {
+  //   uint32_t bits = (static_cast<uint32_t>(b3) << 24) |
+  //                   (static_cast<uint32_t>(b2) << 16) |
+  //                   (static_cast<uint32_t>(b1) <<  8) |
+  //                   (static_cast<uint32_t>(b0));
+  //   float result;
+  //   std::memcpy(&result, &bits, sizeof(result));
+  //   return result;
+  // }
 
   void select_cs(int chipSelect) {
     for (int i = 1; i < 5; i++) { 
@@ -341,6 +388,7 @@ private:
     }
   }
 
+  // Reads a frame from the given chip select and decodes the payload. Returns empty vector on failure.
   std::vector<uint8_t> readFramePayload(int chipSelect, size_t payload_len) {
     select_cs(chipSelect);
 
@@ -363,6 +411,106 @@ private:
     std::vector<uint8_t> payload;
     decode_hdlc_frame(rx, payload_len, payload);
     return payload;
+  }
+
+  
+  // GPS helpers, lowk should be in a separate class but whatever
+  inline void publish_gps(const GPS& g) {
+    uint32_t s = gps_seq_.load(std::memory_order_relaxed);
+    gps_seq_.store(s + 1, std::memory_order_release); // odd => write in progress
+    gps_cache_ = g;
+    gps_seq_.store(s + 2, std::memory_order_release); // even => stable
+  }
+
+  inline GPS read_gps_cached() {
+    GPS g{}; // This is fine because if we never return empty GPS (failed read uses cache)
+    while (true) {
+      uint32_t s1 = gps_seq_.load(std::memory_order_acquire);
+      if (s1 & 1) continue; // writer in progress
+      g = gps_cache_;
+      uint32_t s2 = gps_seq_.load(std::memory_order_acquire);
+      if (s1 == s2) return g;
+    }
+  }
+
+  bool poll_gps_once(GPS& out) {
+    if (!gps_started_) return false;
+
+    if (sim7600.sendATcommand("AT+CGPSINFO", "+CGPSINFO:", 500) != 1) {
+      return false;
+    }
+    // Read remainder for a bounded time window
+    std::string buf;
+    buf.reserve(256);
+    uint64_t t0 = now_us();
+
+    while (now_us() - t0 < 500000ULL) { // 500 ms max
+      while (Serial.available() > 0) {
+        buf.push_back(char(Serial.read()));
+      }
+      if (buf.find("\r\nOK") != std::string::npos || buf.find("\nOK") != std::string::npos) break;
+      usleep(2000);
+    }
+
+    std::cout << buf << std::endl;
+
+    if (buf.find(",,,,") != std::string::npos) return false; // no fix / empty
+
+    std::cout << "c2" << std::endl;
+
+    char lat_s[16]{}, lon_s[16]{};
+    char ns = 0, ew = 0;
+
+    if (sscanf(buf.c_str(), "%15[^,],%c,%15[^,],%c", lat_s, &ns, lon_s, &ew) != 4) {
+	    std::cout << "daniel cant parse data lol" << std::endl; // insubordinate debug statement
+      return false;
+    }
+
+    // ddmm.mmmm / dddmm.mmmm -> decimal degrees
+    double lat_ddmm = atof(lat_s);
+    double lon_dddmm = atof(lon_s);
+
+    int lat_deg = int(lat_ddmm / 100.0);
+    double lat_min = lat_ddmm - (lat_deg * 100.0);
+    double lat = double(lat_deg) + lat_min / 60.0;
+
+    int lon_deg = int(lon_dddmm / 100.0);
+    double lon_min = lon_dddmm - (lon_deg * 100.0);
+    double lon = double(lon_deg) + lon_min / 60.0;
+
+    if (ns == 'S') lat = -lat;
+    else if (ns != 'N') return false;
+
+    if (ew == 'W') lon = -lon;
+    else if (ew != 'E') return false;
+
+    out.ts = static_cast<uint32_t>(now_us());
+    out.gps_lat  = static_cast<float>(lat);
+    out.gps_long = static_cast<float>(lon);
+    return true;
+  }
+
+  void gps_loop() {
+    uint64_t next_poll = now_us();
+
+    while (!stop_.load(std::memory_order_relaxed)) {
+      if (!gps_started_) {
+        usleep(100000); // 100 ms backoff if GPS never started
+        continue;
+      }
+
+      uint64_t t = now_us();
+      if (t >= next_poll) {
+        next_poll += 1'000'000ULL;
+
+        GPS g{}; // This is fine because we don't publish failed reads
+        if (poll_gps_once(g)) {
+          publish_gps(g);
+        }
+      }
+
+      usleep(2000);
+    }
   }
 
   void timer_callback() {
@@ -423,10 +571,7 @@ private:
       snap.rpm_snap_back.rpm_right = NANF;
     }
 
-    // to merge soon
-    snap.gps_snap.ts = 0;
-    snap.gps_snap.gps_lat = NANF;
-    snap.gps_snap.gps_long = NANF;
+    snap.gps_snap = read_gps_cached(); // Latest GPS snapshot from GPS thread
 
     write_snapshot(snap);
   }
@@ -437,8 +582,8 @@ private:
 int main() {
   std::signal(SIGINT, handle_sigint);
 
-  SPIMasterShm node;
+  MasterShm node;
   if (!node.ok()) return 1;
-  node.spin(); // returns on Ctrl+C
+  node.spin(5000); // 200 Hz
   return 0;
 }

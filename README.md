@@ -1,13 +1,18 @@
 # uc26_sensor_reader
 
-C++ SPI reader → POSIX shared memory (seqlock) → Python reader  
-~200 Hz sampling of strain gauges, power, and motor data.
+HDLC-framed SPI sensor reader → POSIX shared memory (seqlock) → Python reader.
 
-Use this library to continuously poll sensor data and read it easily in Python.
+This repository provides a C++ daemon that polls multiple SPI devices at ~200 Hz,
+decodes HDLC-framed payloads with CRC checking, and publishes the latest sensor
+snapshot into POSIX shared memory. Consumers (e.g. Python) can read the data
+lock-free using a sequence lock.
 
-Script should be continuously updated hook up more sensors.
+The system is designed to be extended as additional sensors are brought online.
 
-Also includes `spi_slave.c` to make embedded a bit easier for the team.
+Also includes `spi_slave.c` to make embedded a bit easier for the team. Will update
+this for easy ADC sensor integration soon.
+
+---
 
 ## Python Data Structure
 
@@ -45,13 +50,15 @@ Also includes `spi_slave.c` to make embedded a bit easier for the team.
 
 ## Quick Start
 
-1. **Compile & run the C++ writerBash**
+1. **Compile & run the C++ writer**
    ```bash
-   g++ -O2 -std=c++17 spi_shm.cpp \
-      -lpigpiod_if2 -lrt -pthread \
-      -o spi_writer
+    g++ -O2 -std=c++17 write_shm.cpp \
+        lib/sim7x00.cpp lib/arduPi.cpp \
+    -lpigpiod_if2 -lrt -pthread \
+    -o shm_writer
 
-   ./spi_writer
+    sudo pigpiod
+    sudo ./shm_writer
    ```
    (keep this running in one terminal — Ctrl+C to stop cleanly)
  
@@ -81,7 +88,7 @@ Current SPI setup (for Electrical reference):
 | CS GPIO | Description          | Format                     |
 |---------|----------------------|----------------------------|
 | 22      | Power Monitor      | u32 ts + float current + float voltage    |
-| 23      | "Motor Controller," will be repurposed for driver input data     | u32 ts + float throttle + float velocity  |
+| 23      | Driver              | u32 ts + float throttle + float brake + float turn_angle  |
 | 24      | Front RPM       | u32 ts + float rpm_left + float rpm_right   |
 | 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
 
