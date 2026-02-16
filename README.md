@@ -134,3 +134,12 @@ In `pico-firmware/telemetry_config.h`:
 #define ADC_COUNTS_MAX  4095.0f
 
 ```
+
+Additionally, when building the Pico firmware, ensure the `pico-firmware` directory is added 
+to the include path so `telemetry_config.h` is visible:
+
+```cmake
+target_include_directories(spi_slave PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+```
+
+This allows configuration changes in `telemetry_config.h` to be compiled directly into the firmware.
