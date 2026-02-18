@@ -351,7 +351,7 @@ private:
       shm_fd_ = -1;
     }
     // If you want SHM to persist across writer restarts, comment this out.
-    shm_unlink(SHM_NAME);
+    // shm_unlink(SHM_NAME);
   }
 
   // Writes snap to shared memory with a simple sequence lock for synchronization.
