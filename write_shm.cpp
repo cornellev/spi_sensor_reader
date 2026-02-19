@@ -181,7 +181,7 @@ struct SensorSnapshot { // 12 * 4 + 16 = 64 bytes
   Driver driver_snap;
   RPM rpm_snap_front;
   RPM rpm_snap_back;
-  GPS gps_snap; // TODO
+  GPS gps_snap;
 };
 #pragma pack(pop)
 
@@ -351,7 +351,7 @@ private:
       shm_fd_ = -1;
     }
     // If you want SHM to persist across writer restarts, comment this out.
-    shm_unlink(SHM_NAME);
+    // shm_unlink(SHM_NAME);
   }
 
   // Writes snap to shared memory with a simple sequence lock for synchronization.
