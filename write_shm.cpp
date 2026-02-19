@@ -461,6 +461,7 @@ private:
 
     if (sscanf(buf.c_str(), "%15[^,],%c,%15[^,],%c", lat_s, &ns, lon_s, &ew) != 4) {
 	    std::printf("daniel cant parse data lol\n"); // insubordinate debug statement
+      std::printf("buf was: %s\n", buf.c_str()); // a better debug statement
       return false;
     }
 
