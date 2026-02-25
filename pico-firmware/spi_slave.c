@@ -227,7 +227,7 @@ void irq_handler(uint gpio, uint32_t events)
 
         uint32_t now_us = (uint32_t)time_us_64();
 
-        uint8_t payload[MAX_PAYLOAD_BYTES];
+        uint8_t payload[4 + (size_t)(4 * N_CH)];
         size_t payload_len = build_payload(payload, sizeof(payload), now_us);
         if (payload_len == 0) return;
 
