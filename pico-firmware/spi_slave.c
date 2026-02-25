@@ -36,16 +36,18 @@
 //   crc     = 4B
 //   stuffing worst-case: +1 bit per 5 bits
 //   flags   = 2 bytes (never stuffed)
+#define PAYLOAD_MAX_BYTES (4u + 4u * (unsigned)N_CH)
 #define FRAME_MAX_BYTES                                                                            \
     ({                                                                                             \
-        const unsigned payload_bytes = 4u + 4u * (unsigned)N_CH;                                   \
-        const unsigned stuffed_bits = ((payload_bytes + 4u) * 8u * 6u + 4u) / 5u;                  \
+        const unsigned stuffed_bits = ((PAYLOAD_MAX_BYTES + 4u) * 8u * 6u + 4u) / 5u;              \
         const unsigned frame_bits = stuffed_bits + 16u;                                            \
         (frame_bits + 7u) / 8u;                                                                    \
     })
+
+uint8_t payload_buf[PAYLOAD_MAX_BYTES];
 uint8_t frame_buf[FRAME_MAX_BYTES];
 
-int data_chan;
+int data_chan; // DMA channel for SPI TX 
 
 static inline float fake_signal_from_now(void) {
     float now_us = (float)time_us_64();
@@ -53,12 +55,14 @@ static inline float fake_signal_from_now(void) {
     return 127.0f * sinf(t) + 127.0f;
 }
 
+// Put GPIO into high-impedance so the SPI slave releases MISO when not selected
 inline void set_gpio_hi_z(uint pin) {
     io_bank0_hw->io[pin].ctrl =
         (io_bank0_hw->io[pin].ctrl & ~IO_BANK0_GPIO0_CTRL_OEOVER_BITS) |
         (IO_BANK0_GPIO0_CTRL_OEOVER_VALUE_DISABLE << IO_BANK0_GPIO0_CTRL_OEOVER_LSB);
 }
 
+// Set up DMA for quick SPI TX writes
 void configure_dma(void) {
     data_chan = dma_claim_unused_channel(true);
     dma_channel_config c = dma_channel_get_default_config(data_chan);
@@ -165,11 +169,7 @@ static float read_channel(int i) {
 #endif
 }
 
-size_t build_payload(uint8_t *payload, size_t payload_cap, uint32_t now_us) {
-    const size_t need = 4 + (size_t)(4 * N_CH);
-    if (need > payload_cap)
-        return 0;
-
+void build_payload(uint8_t *payload, uint32_t now_us) {
     // LITTLE ENDIAN timestamp
     payload[0] = (uint8_t)(now_us >> 0);
     payload[1] = (uint8_t)(now_us >> 8);
@@ -188,21 +188,19 @@ size_t build_payload(uint8_t *payload, size_t payload_cap, uint32_t now_us) {
         payload[off + 2] = (uint8_t)(x.u >> 16);
         payload[off + 3] = (uint8_t)(x.u >> 24);
     }
-
-    return need;
 }
 
 // START + STUFF(payload|crc) + END
-int build_frame(uint8_t *out, size_t out_cap, const uint8_t *payload, size_t payload_len) {
-    memset(out, 0, out_cap);
+int build_frame(uint8_t *out, const uint8_t *payload) {
+    memset(out, 0, (size_t)FRAME_MAX_BYTES);
     int bitpos = 0;
 
     // Start flag
-    if (!put_byte_msb(out, out_cap, &bitpos, FLAG_BYTE))
+    if (!put_byte_msb(out, (size_t)FRAME_MAX_BYTES, &bitpos, FLAG_BYTE))
         return -1;
 
     // Compute CRC
-    uint32_t crc = calculate_crc32(payload, payload_len);
+    uint32_t crc = calculate_crc32(payload, (size_t)PAYLOAD_MAX_BYTES);
     uint8_t crc_le[4] = {
         (uint8_t)(crc >> 0),
         (uint8_t)(crc >> 8),
@@ -212,13 +210,13 @@ int build_frame(uint8_t *out, size_t out_cap, const uint8_t *payload, size_t pay
 
     int ones = 0;
 
-    if (!put_bytes_stuffed(out, out_cap, &bitpos, payload, payload_len, &ones))
+    if (!put_bytes_stuffed(out, (size_t)FRAME_MAX_BYTES, &bitpos, payload, (size_t)PAYLOAD_MAX_BYTES, &ones))
         return -1;
-    if (!put_bytes_stuffed(out, out_cap, &bitpos, crc_le, sizeof(crc_le), &ones))
+    if (!put_bytes_stuffed(out, (size_t)FRAME_MAX_BYTES, &bitpos, crc_le, sizeof(crc_le), &ones))
         return -1;
 
     // End flag
-    if (!put_byte_msb(out, out_cap, &bitpos, FLAG_BYTE))
+    if (!put_byte_msb(out, (size_t)FRAME_MAX_BYTES, &bitpos, FLAG_BYTE))
         return -1;
 
     return bytes_used_from_bitpos(bitpos);
@@ -226,6 +224,7 @@ int build_frame(uint8_t *out, size_t out_cap, const uint8_t *payload, size_t pay
 
 void irq_handler(uint gpio, uint32_t events) {
     if (events & GPIO_IRQ_EDGE_FALL) {
+        dma_channel_abort(data_chan);
         gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
 
         spi_get_hw(SPI_PORT)->icr = SPI_SSPICR_RORIC_BITS;
@@ -234,17 +233,13 @@ void irq_handler(uint gpio, uint32_t events) {
 
         uint32_t now_us = (uint32_t)time_us_64();
 
-        uint8_t payload[4 + (size_t)(4 * N_CH)];
-        size_t payload_len = build_payload(payload, sizeof(payload), now_us);
-        if (payload_len == 0)
-            return;
-
-        int frame_len = build_frame(frame_buf, sizeof(frame_buf), payload, payload_len);
+        build_payload(payload_buf, now_us);
+        int frame_len = build_frame(frame_buf, payload_buf);
         if (frame_len <= 0)
             return;
 
         dma_hw->ch[data_chan].read_addr = (uintptr_t)frame_buf;
-        dma_channel_set_trans_count(data_chan, (uint32_t)frame_len, false);
+        dma_channel_set_trans_count(data_chan, (uint32_t)frame_len, false); // only transmit frame_len 
         dma_start_channel_mask(1u << data_chan);
     } else if (events & GPIO_IRQ_EDGE_RISE) {
         set_gpio_hi_z(PIN_TX);
@@ -273,6 +268,7 @@ int main() {
     gpio_set_function(PIN_RX, GPIO_FUNC_SPI);
     gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
     gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
+    set_gpio_hi_z(PIN_TX);
 
     spi_set_format(SPI_PORT, 8, SPI_CPOL_0, SPI_CPHA_1, false);
 
