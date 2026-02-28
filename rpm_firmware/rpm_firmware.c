@@ -142,35 +142,32 @@ static void configure_dma(void) {
     );
 }
 
-static void hall_irq(uint gpio, uint32_t events) {
-    if (gpio != HALL_PIN) return;
-    if (!(events & GPIO_IRQ_EDGE_RISE)) return;
+static void irq_handler(uint gpio, uint32_t events) {
+    if ((gpio == HALL_PIN) && (events & GPIO_IRQ_EDGE_RISE)) {
 
-    uint32_t now = (uint32_t)time_us_64();
+        uint32_t now = (uint32_t)time_us_64();
 
-    if (last_rise_us == 0) {
+        if (last_rise_us == 0) {
+            last_rise_us = now;
+            motor_rpm = 0.0f;
+            return;
+        }
+
+        uint32_t period_us = now - last_rise_us;
         last_rise_us = now;
-        motor_rpm = 0.0f;
-        return;
-    }
 
-    uint32_t period_us = now - last_rise_us;
-    last_rise_us = now;
+        float raw_rpm = 60.0e6f / ((float)period_us * (float)PPR);
 
-    float raw_rpm = 60.0e6f / ((float)period_us * (float)PPR);
+        // Validate in RPM-space only
+        if (raw_rpm < MIN_RPM || raw_rpm > MAX_RPM) {
+            return;
+        }
 
-    // Validate in RPM-space only
-    if (raw_rpm < MIN_RPM || raw_rpm > MAX_RPM) {
-        return;
-    }
+        motor_rpm = raw_rpm;
+        // printf("%f\n", motor_rpm);
 
-    motor_rpm = raw_rpm;
-}
+    } else if ((gpio == PIN_CS) && (events & GPIO_IRQ_EDGE_FALL)) {
 
-static void cs_irq(uint gpio, uint32_t events) {
-    if (gpio != PIN_CS) return;
-
-    if (events & GPIO_IRQ_EDGE_FALL) {
         uint32_t ts = (uint32_t)time_us_64();
         float rpm = motor_rpm;
 
@@ -190,7 +187,7 @@ static void cs_irq(uint gpio, uint32_t events) {
         dma_channel_set_read_addr(dma_chan, frame_buf, false);
         dma_channel_set_trans_count(dma_chan, frame_len, true);
 
-    } else if (events & GPIO_IRQ_EDGE_RISE) {
+    } else if ((gpio == PIN_CS) && (events & GPIO_IRQ_EDGE_RISE)) {
         if (dma_chan >= 0) dma_channel_abort(dma_chan);
         set_gpio_hi_z(PIN_TX);
     }
@@ -199,14 +196,13 @@ static void cs_irq(uint gpio, uint32_t events) {
 static void init_all(void) {
     stdio_init_all();
 
+    irq_set_enabled(IO_IRQ_BANK0, true);
     gpio_init(HALL_PIN);
     gpio_set_dir(HALL_PIN, GPIO_IN);
-    gpio_pull_up(HALL_PIN); // i think this is right, might need to check
-    gpio_set_irq_enabled_with_callback(
-        HALL_PIN,
-        GPIO_IRQ_EDGE_RISE,
-        true,
-        &hall_irq
+    gpio_set_irq_enabled(
+        HALL_PIN, 
+        GPIO_IRQ_EDGE_RISE, 
+        true
     );
 
     spi_init(SPI_PORT, 1 * 1000 * 1000);
@@ -223,11 +219,15 @@ static void init_all(void) {
         PIN_CS,
         GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE,
         true,
-        &cs_irq
+        &irq_handler
     );
 
     gpio_init(PIN_TX);
     set_gpio_hi_z(PIN_TX);
+
+    gpio_init(25);
+    gpio_set_dir(25, GPIO_OUT);
+    gpio_put(25, 1);
 
     configure_dma();
 }
@@ -235,6 +235,7 @@ static void init_all(void) {
 int main(void) {
     init_all();
     while (true) {
+        // printf("%d\n", gpio_get(HALL_PIN));
         tight_loop_contents();
     }
 }

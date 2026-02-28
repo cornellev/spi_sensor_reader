@@ -28,33 +28,33 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(uc26_sensor_reader C CXX ASM)
+project(rpm_firmware C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(uc26_sensor_reader uc26_sensor_reader.c )
+add_executable(rpm_firmware rpm_firmware.c )
 
-pico_set_program_name(uc26_sensor_reader "uc26_sensor_reader")
-pico_set_program_version(uc26_sensor_reader "0.1")
+pico_set_program_name(rpm_firmware "rpm_firmware")
+pico_set_program_version(rpm_firmware "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(uc26_sensor_reader 0)
-pico_enable_stdio_usb(uc26_sensor_reader 1)
+pico_enable_stdio_uart(rpm_firmware 0)
+pico_enable_stdio_usb(rpm_firmware 1)
 
 # Add the standard library to the build
-target_link_libraries(uc26_sensor_reader
+target_link_libraries(rpm_firmware
         pico_stdlib
         hardware_spi
         hardware_dma
         )
 
 # Add the standard include files to the build
-target_include_directories(uc26_sensor_reader PRIVATE
+target_include_directories(rpm_firmware PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
-pico_add_extra_outputs(uc26_sensor_reader)
+pico_add_extra_outputs(rpm_firmware)
 
