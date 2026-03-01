@@ -28,7 +28,7 @@ constexpr uint8_t SPI_MODE = 1;         // CPOL=0, CPHA=1
 constexpr uint32_t SPI_SPEED = 1000000; // 1 MHz
 constexpr const char *SPI_DEVICE = "/dev/spidev0.0";
 
-static constexpr int CS_PINS[4] = {22, 23, 24, 25};
+static constexpr int CS_PINS[5] = {22, 23, 24, 25, 26};
 
 constexpr float NANF = (std::nanf("1"));
 
@@ -180,23 +180,31 @@ struct GPS {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct SensorSnapshot { // 12 * 4 + 16 = 64 bytes
+struct Motor {
+    uint32_t ts;
+    float ang_vel;
+    float throttle;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct SensorSnapshot { // 12 * 5 + 16 = 76 bytes
     Power power_snap;
     Driver driver_snap;
     RPM rpm_snap_front;
     RPM rpm_snap_back;
     GPS gps_snap;
+    Motor motor_snap;
 };
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct SharedBlock { // 68 bytes
+struct SharedBlock { // 80 bytes
     std::atomic<uint32_t> seq;
     SensorSnapshot data;
 };
 #pragma pack(pop)
 
-// Asserts
 static_assert(sizeof(std::atomic<uint32_t>) == 4, "atomic<uint32_t> must be 4 bytes");
 static_assert(offsetof(SharedBlock, seq) == 0, "seq must be at offset 0");
 static_assert(offsetof(SharedBlock, data) == 4, "data must start immediately after seq");
@@ -204,8 +212,9 @@ static_assert(sizeof(Power) == 12);
 static_assert(sizeof(Driver) == 16);
 static_assert(sizeof(RPM) == 12);
 static_assert(sizeof(GPS) == 12);
-static_assert(sizeof(SensorSnapshot) == 64);
-static_assert(sizeof(SharedBlock) == 68);
+static_assert(sizeof(Motor) == 12);
+static_assert(sizeof(SensorSnapshot) == 76);
+static_assert(sizeof(SharedBlock) == 80);
 
 static constexpr const char *SHM_NAME = "/sensor_shm";
 
@@ -225,7 +234,7 @@ class MasterShm {
         }
         std::fprintf(stderr, "pigpio initialized\n");
 
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 5; i++) {
             set_mode(pi_, CS_PINS[i], PI_OUTPUT);
         }
         deselect_all_cs();
@@ -390,13 +399,13 @@ class MasterShm {
     // }
 
     void select_cs(int chipSelect) {
-        for (int i = 1; i < 5; i++) {
+        for (int i = 1; i < 6; i++) {
             gpio_write(pi_, CS_PINS[i - 1], chipSelect == i ? 0 : 1);
         }
     }
 
     void deselect_all_cs() {
-        for (int i = 1; i < 5; i++) {
+        for (int i = 1; i < 6; i++) {
             gpio_write(pi_, CS_PINS[i - 1], 1);
         }
     }
@@ -541,6 +550,7 @@ class MasterShm {
         auto driver_p = readFramePayload(2, sizeof(Driver)); // 16
         auto rpm_f_p = readFramePayload(3, sizeof(RPM));     // 12
         auto rpm_b_p = readFramePayload(4, sizeof(RPM));     // 12
+        auto motor_p = readFramePayload(5, sizeof(Motor));   // 12
 
         SensorSnapshot snap{};
 
@@ -592,6 +602,17 @@ class MasterShm {
             snap.rpm_snap_back.ts = 0;
             snap.rpm_snap_back.rpm_left = NANF;
             snap.rpm_snap_back.rpm_right = NANF;
+        }
+
+        if (motor_p.size() == sizeof(Motor)) {
+            const uint8_t *p = motor_p.data();
+            snap.motor_snap.ts = u32_le_bytes(p + 0);
+            snap.motor_snap.ang_vel = f32_le_bytes(p + 4);
+            snap.motor_snap.throttle = f32_le_bytes(p + 8);
+        } else {
+            snap.motor_snap.ts = 0;
+            snap.motor_snap.ang_vel = NANF;
+            snap.motor_snap.throttle = NANF;
         }
 
         snap.gps_snap = read_gps_cached(); // Latest GPS snapshot from GPS thread
