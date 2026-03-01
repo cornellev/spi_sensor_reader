@@ -13,7 +13,8 @@ SENSOR_FMT = "<" + (
     "I" + "f" + "f" + "f" +  # driver
     "I" + "f" + "f" +        # rpm_front
     "I" + "f" + "f" +        # rpm_back
-    "I" + "f" + "f"          # gps
+    "I" + "f" + "f" +        # gps
+    "I" + "f" + "f"          # motor
 )
 SENSOR_SIZE = struct.calcsize(SENSOR_FMT)
 
@@ -96,6 +97,7 @@ class SensorShmReader:
             "rpm_front": {"ts": d[7], "rpm_left": d[8], "rpm_right": d[9]},
             "rpm_back": {"ts": d[10], "rpm_left": d[11], "rpm_right": d[12]},
             "gps": {"ts": d[13], "gps_lat": d[14], "gps_long": d[15]},
+            "motor": {"ts": d[16], "ang_vel": d[17], "throttle": d[18]},
         }
 
 def main():
