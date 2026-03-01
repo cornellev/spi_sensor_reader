@@ -47,6 +47,11 @@ The system is designed to be extended as additional sensors are brought online.
         "lat": float,         # read_snapshot()[1][14]
         "long": float,        # read_snapshot()[1][15]
     },
+    "motor": {
+        "ts": int,            # read_snapshot()[1][16]
+        "ang_vel": float,     # read_snapshot()[1][17]
+        "throttle": float,    # read_snapshot()[1][18]
+    },
 }
 ```
 
@@ -93,19 +98,24 @@ Proposed SPI setup for UC26:
 | 23      | Driver              | u32 ts + float throttle + float brake + float turn_angle  |
 | 24      | Front RPM       | u32 ts + float rpm_left + float rpm_right   |
 | 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
+| 26      | Motor Controller | u32 ts + float ang_vel + float throttle |
 
 Bus: `/dev/spidev0.0`
 
 This repository also makes it easy to flash an RP2040 with custom SPI-slave firmware that
-integrates cleanly into the existing SPI polling pipeline.
+integrates cleanly into the existing SPI polling pipeline for analog sensors. There is also firmware
+for the RPM sensor which times between digital pulses. Motor controller firmware will be added soon 
+which expects a combination of a digital pulse signal and analog signal. The rest of our sensors
+should be analog though, so we have made it easy to configure the firmware to work with any of these
+sensors.
 
-The Pico firmware (`pico-firmware/spi_slave.c`) acts as an SPI slave device. Whenever
+The Pico firmware (`pico_firmware/adc_general_firmware/spi_slave.c`) acts as an SPI slave device. Whenever
 the master asserts chip-select, the Pico responds with a single HDLC-framed message
 containing a timestamp and a fixed number of ADC readings. The payload is CRC-protected
 and bit-stuffed, so it can be safely parsed by the existing HDLC decoder on the host.
 
 To add a new Pico-based sensor, you configure its ADC channels and calibration in
-`telemetry_config.h`, flash the firmware, and assign the Pico to one of the CS lines
+`pico_firmware/adc_general_firmware/telemetry_config.h`, flash the firmware, and assign the Pico to one of the CS lines
 above. From the host’s perspective, the Pico behaves like any other SPI sensor.
 
 Suppose you want to implement the Joulemeter/Power montitor (CS GPIO 22) using a Pico with 
@@ -113,7 +123,7 @@ two analog inputs:
 - Channel 0: current sense amplifier output
 - Channel 1: voltage divider output
 
-In `pico-firmware/telemetry_config.h`:
+In `pico_firmware/adc_general_firmware/telemetry_config.h`:
 
 ```c
 // 1 = fake, 0 = real ADC
@@ -135,11 +145,5 @@ In `pico-firmware/telemetry_config.h`:
 
 ```
 
-Additionally, when building the Pico firmware, ensure the `pico-firmware` directory is added 
-to the include path so `telemetry_config.h` is visible:
-
-```cmake
-target_include_directories(spi_slave PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-```
-
-This allows configuration changes in `telemetry_config.h` to be compiled directly into the firmware.
+Additionally, when building the Pico firmware, ensure the `pico_firmware/adc_general_firmware` directory is added 
+to the include path so `telemetry_config.h` is visible.
