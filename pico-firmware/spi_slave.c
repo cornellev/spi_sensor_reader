@@ -37,17 +37,14 @@
 //   stuffing worst-case: +1 bit per 5 bits
 //   flags   = 2 bytes (never stuffed)
 #define PAYLOAD_MAX_BYTES (4u + 4u * (unsigned)N_CH)
-#define FRAME_MAX_BYTES                                                                            \
-    ({                                                                                             \
-        const unsigned stuffed_bits = ((PAYLOAD_MAX_BYTES + 4u) * 8u * 6u + 4u) / 5u;              \
-        const unsigned frame_bits = stuffed_bits + 16u;                                            \
-        (frame_bits + 7u) / 8u;                                                                    \
-    })
+#define FRAME_MAX_BYTES ( \
+    ( ( ( ((PAYLOAD_MAX_BYTES + 4u) * 8u * 6u + 4u) / 5u ) + 16u ) + 7u ) / 8u \
+)
 
 uint8_t payload_buf[PAYLOAD_MAX_BYTES];
 uint8_t frame_buf[FRAME_MAX_BYTES];
 
-int data_chan; // DMA channel for SPI TX 
+static int data_chan = -1; // DMA channel for SPI TX 
 
 static inline float fake_signal_from_now(void) {
     float now_us = (float)time_us_64();
@@ -56,10 +53,10 @@ static inline float fake_signal_from_now(void) {
 }
 
 // Put GPIO into high-impedance so the SPI slave releases MISO when not selected
-inline void set_gpio_hi_z(uint pin) {
-    io_bank0_hw->io[pin].ctrl =
-        (io_bank0_hw->io[pin].ctrl & ~IO_BANK0_GPIO0_CTRL_OEOVER_BITS) |
-        (IO_BANK0_GPIO0_CTRL_OEOVER_VALUE_DISABLE << IO_BANK0_GPIO0_CTRL_OEOVER_LSB);
+static inline void set_gpio_hi_z(uint pin) {
+    gpio_set_function(pin, GPIO_FUNC_SIO);
+    gpio_set_dir(pin, GPIO_IN);
+    gpio_disable_pulls(pin);
 }
 
 // Set up DMA for quick SPI TX writes
@@ -71,7 +68,13 @@ void configure_dma(void) {
     channel_config_set_write_increment(&c, false);
     channel_config_set_dreq(&c, DREQ_SPI0_TX);
 
-    dma_channel_configure(data_chan, &c, &spi_get_hw(SPI_PORT)->dr, frame_buf, 1, false);
+    dma_channel_configure(
+        data_chan, 
+        &c, 
+        &spi_get_hw(SPI_PORT)->dr, 
+        frame_buf, 
+        0, 
+        false);
 }
 
 // IEEE CRC32
@@ -224,7 +227,7 @@ int build_frame(uint8_t *out, const uint8_t *payload) {
 
 void irq_handler(uint gpio, uint32_t events) {
     if (events & GPIO_IRQ_EDGE_FALL) {
-        dma_channel_abort(data_chan);
+        if (data_chan >= 0) dma_channel_abort(data_chan);
         gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
 
         spi_get_hw(SPI_PORT)->icr = SPI_SSPICR_RORIC_BITS;
@@ -257,7 +260,7 @@ int main() {
 #if !USE_FAKE_DATA
     adc_init();
     for (int i = 0; i < N_CH; i++) {
-        // Configure GPIO for ADC (safe even if duplicated)
+        // Configure GPIO for ADC 
         adc_gpio_init(adc_gpios[i]);
     }
 #endif
@@ -279,6 +282,6 @@ int main() {
 
     while (true) {
         // printf("Hello, world!\n");
-        sleep_ms(1000);
+        tight_loop_contents();
     }
 }

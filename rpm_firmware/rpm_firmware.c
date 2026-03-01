@@ -15,12 +15,13 @@
 #define PIN_CS   17
 #define PIN_SCK  18
 #define PIN_TX   19
+#define LED      25
 
 #define HALL_PIN 2
 #define PPR      32
 
-#define MIN_RPM  10.0f
-#define MAX_RPM  8000.0f
+#define MIN_RPM  1.0f
+#define MAX_RPM  5000.0f
 
 #define FLAG_BYTE 0x7E
 
@@ -34,21 +35,21 @@
 static volatile uint32_t last_rise_us = 0;
 static volatile float motor_rpm = 0.0f;
 
-static int dma_chan = -1;
+static int data_chan = -1;
 
 static uint8_t payload[PAYLOAD_LEN];
 static uint8_t frame_buf[FRAME_MAX_BYTES];
 static volatile uint32_t frame_len = 0;
 
 static inline void set_gpio_hi_z(uint pin) {
-    io_bank0_hw->io[pin].ctrl =
-        (io_bank0_hw->io[pin].ctrl & ~IO_BANK0_GPIO0_CTRL_OEOVER_BITS) |
-        (IO_BANK0_GPIO0_CTRL_OEOVER_VALUE_DISABLE << IO_BANK0_GPIO0_CTRL_OEOVER_LSB);
+    gpio_set_function(pin, GPIO_FUNC_SIO);
+    gpio_set_dir(pin, GPIO_IN);
+    gpio_disable_pulls(pin);
 }
 
-static inline void set_tx_spi_func(void) {
-    gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
-}
+// static inline void set_tx_spi_func(void) {
+//     gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
+// }
 
 static inline void pack_u32_le(uint8_t* dst, uint32_t x) {
     dst[0] = (uint8_t)(x & 0xFF);
@@ -123,17 +124,17 @@ static uint32_t build_hdlc_frame(const uint8_t* pl, size_t pl_len, uint8_t* out)
     return bytes + 1u;
 }
 
+// Set up DMA for quick SPI TX writes
 static void configure_dma(void) {
-    dma_chan = dma_claim_unused_channel(true);
-
-    dma_channel_config c = dma_channel_get_default_config(dma_chan);
+    data_chan = dma_claim_unused_channel(true);
+    dma_channel_config c = dma_channel_get_default_config(data_chan);
     channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
     channel_config_set_read_increment(&c, true);
     channel_config_set_write_increment(&c, false);
     channel_config_set_dreq(&c, DREQ_SPI0_TX);
 
     dma_channel_configure(
-        dma_chan,
+        data_chan,
         &c,
         &spi_get_hw(SPI_PORT)->dr,
         frame_buf,
@@ -143,66 +144,92 @@ static void configure_dma(void) {
 }
 
 static void irq_handler(uint gpio, uint32_t events) {
-    if ((gpio == HALL_PIN) && (events & GPIO_IRQ_EDGE_RISE)) {
 
-        uint32_t now = (uint32_t)time_us_64();
+    switch (gpio) {
 
-        if (last_rise_us == 0) {
-            last_rise_us = now;
-            motor_rpm = 0.0f;
-            return;
-        }
+        case HALL_PIN:
+            if (events & GPIO_IRQ_EDGE_RISE) {
 
-        uint32_t period_us = now - last_rise_us;
-        last_rise_us = now;
+                uint32_t now = (uint32_t)time_us_64();
 
-        float raw_rpm = 60.0e6f / ((float)period_us * (float)PPR);
+                if (last_rise_us == 0) {
+                    last_rise_us = now;
+                    motor_rpm = 0.0f;
+                    break;
+                }
 
-        // Validate in RPM-space only
-        if (raw_rpm < MIN_RPM || raw_rpm > MAX_RPM) {
-            return;
-        }
+                uint32_t period_us = now - last_rise_us;
+                last_rise_us = now;
 
-        motor_rpm = raw_rpm;
-        // printf("%f\n", motor_rpm);
+                float raw_rpm = 60.0e6f / ((float)period_us * (float)PPR);
 
-    } else if ((gpio == PIN_CS) && (events & GPIO_IRQ_EDGE_FALL)) {
+                if (raw_rpm >= MIN_RPM && raw_rpm <= MAX_RPM) {
+                    motor_rpm = raw_rpm;
+                }
+            }
+            break;
 
-        uint32_t ts = (uint32_t)time_us_64();
-        float rpm = motor_rpm;
+        case PIN_CS:
 
-        pack_u32_le(&payload[0], ts);
-        pack_f32_le(&payload[4], rpm);
-        pack_f32_le(&payload[8], rpm);
+            if (events & GPIO_IRQ_EDGE_FALL) {
 
-        uint32_t len = build_hdlc_frame(payload, PAYLOAD_LEN, frame_buf);
-        if (len == 0) {
-            set_gpio_hi_z(PIN_TX);
-            return;
-        }
+                if (data_chan >= 0) dma_channel_abort(data_chan);
 
-        frame_len = len;
+                gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
 
-        set_tx_spi_func();
-        dma_channel_set_read_addr(dma_chan, frame_buf, false);
-        dma_channel_set_trans_count(dma_chan, frame_len, true);
+                // Clear SPI overrun and drain RX FIFO
+                spi_get_hw(SPI_PORT)->icr = SPI_SSPICR_RORIC_BITS;
+                while (spi_is_readable(SPI_PORT))
+                    (void)spi_get_hw(SPI_PORT)->dr;
 
-    } else if ((gpio == PIN_CS) && (events & GPIO_IRQ_EDGE_RISE)) {
-        if (dma_chan >= 0) dma_channel_abort(dma_chan);
-        set_gpio_hi_z(PIN_TX);
+                uint32_t ts = (uint32_t)time_us_64();
+                float rpm = motor_rpm;
+
+                pack_u32_le(&payload[0], ts);
+                pack_f32_le(&payload[4], rpm);
+                pack_f32_le(&payload[8], rpm);
+
+                uint32_t len = build_hdlc_frame(payload, PAYLOAD_LEN, frame_buf);
+                if (len == 0) {
+                    set_gpio_hi_z(PIN_TX);
+                    break;
+                }
+
+                frame_len = len;
+
+                dma_channel_set_read_addr(data_chan, frame_buf, false);
+                dma_channel_set_trans_count(data_chan, frame_len, true);
+
+            } else if (events & GPIO_IRQ_EDGE_RISE) {
+
+                if (data_chan >= 0)
+                    dma_channel_abort(data_chan);
+
+                set_gpio_hi_z(PIN_TX);
+            }
+
+            break;
+
+        default:
+            break;
     }
 }
 
 static void init_all(void) {
     stdio_init_all();
 
+    gpio_init(LED);
+    gpio_set_dir(LED, GPIO_OUT);
+    gpio_put(LED, 1);
+
     irq_set_enabled(IO_IRQ_BANK0, true);
     gpio_init(HALL_PIN);
     gpio_set_dir(HALL_PIN, GPIO_IN);
-    gpio_set_irq_enabled(
+    gpio_set_irq_enabled_with_callback( 
         HALL_PIN, 
         GPIO_IRQ_EDGE_RISE, 
-        true
+        true,
+        &irq_handler
     );
 
     spi_init(SPI_PORT, 1 * 1000 * 1000);
@@ -211,6 +238,8 @@ static void init_all(void) {
 
     gpio_set_function(PIN_RX,  GPIO_FUNC_SPI);
     gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
+    gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
+    set_gpio_hi_z(PIN_TX);
 
     gpio_init(PIN_CS);
     gpio_set_dir(PIN_CS, GPIO_IN);
@@ -222,12 +251,9 @@ static void init_all(void) {
         &irq_handler
     );
 
-    gpio_init(PIN_TX);
-    set_gpio_hi_z(PIN_TX);
-
-    gpio_init(25);
-    gpio_set_dir(25, GPIO_OUT);
-    gpio_put(25, 1);
+    // gpio_init(PIN_TX);
+    // set_gpio_hi_z(PIN_TX);
+    // gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
 
     configure_dma();
 }
