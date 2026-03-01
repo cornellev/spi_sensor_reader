@@ -19,6 +19,7 @@ The system is designed to be extended as additional sensors are brought online.
 ## Python Data Structure
 
 ```python
+# read_snapshot_dict() returns:
 {
     "seq": int,               # read_snapshot()[0]
     "power": {
