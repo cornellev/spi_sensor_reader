@@ -56,6 +56,14 @@ The system is designed to be extended as additional sensors are brought online.
     },
 }
 ```
+### Timestamp notes:
+Please use sensor-specific timestamps for any sensor-level calculations (e.g., computing Δt).
+
+The 32-bit sensor timestamps are generated independently on each sensor microcontroller.
+They may not be synchronized with one another and will wrap to 0 approximately every 71 minutes.
+
+Use the global 64-bit timestamp for bookkeeping purposes (e.g., time-series alignment and logging).
+The global timestamp is applied each time the shared memory block is written.
 
 ## Quick Start
 
@@ -90,13 +98,6 @@ The system is designed to be extended as additional sensors are brought online.
     finally:
         reader.close()
     ```
-    Please use sensor-specific timestamps for any sensor-level calculations (e.g., computing Δt).
-    
-    The 32-bit sensor timestamps are generated independently on each sensor microcontroller.
-    They may not be synchronized with one another and will wrap to 0 approximately every 71 minutes.
-    
-    Use the global 64-bit timestamp for bookkeeping purposes (e.g., time-series alignment and logging).
-    The global timestamp is applied each time the shared memory block is written.
 
 ## Electrical Section
 
