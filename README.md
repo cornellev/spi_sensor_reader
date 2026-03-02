@@ -65,6 +65,8 @@ They may not be synchronized with one another and will wrap to 0 approximately e
 Use the global 64-bit timestamp for bookkeeping purposes (e.g., time-series alignment and logging).
 The global timestamp is applied each time the shared memory block is written.
 
+All timestamps are in microseconds.
+
 ## Quick Start
 
 1. **Compile & run the C++ writer**
