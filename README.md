@@ -22,7 +22,7 @@ The system is designed to be extended as additional sensors are brought online.
 # read_snapshot_dict() returns:
 {
     "seq": int,               # read_snapshot()[0]
-    "global_ts",              # read_snapshot()[1][0]
+    "global_ts": int,         # read_snapshot()[1][0]
     "power": {
         "ts": int,            # read_snapshot()[1][1]
         "current": float,     # read_snapshot()[1][2]
