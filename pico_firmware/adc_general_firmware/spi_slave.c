@@ -144,7 +144,16 @@ inline int bytes_used_from_bitpos(int bitpos) {
 }
 
 static inline float adc_counts_to_volts(uint16_t raw) {
+
+#if ADC_DEADZONE > 0 // I just love the C preprocessor
+    if (raw < ADC_DEADZONE)
+        return 0.0f;
+    else if (raw > (uint16_t)(ADC_COUNTS_MAX) - ADC_DEADZONE)
+        return ADC_VREF;
+#endif
+
     return ((float)raw) * (ADC_VREF / ADC_COUNTS_MAX);
+    
 }
 
 static float read_channel(int i) {

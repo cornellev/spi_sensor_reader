@@ -152,7 +152,8 @@ In `pico_firmware/adc_general_firmware/telemetry_config.h`:
 #define CONV_M          { 1.0f, 1.0f } // I do not know the actual conversions you'll need.
 #define CONV_B          { 0.0f, 0.0f }
 
-// ADC parameters 
+// ADC parameters
+#define ADC_DEADZONE    0              // Similarly I do not know this
 #define ADC_VREF        3.3f
 #define ADC_COUNTS_MAX  4095.0f
 
