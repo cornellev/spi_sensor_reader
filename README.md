@@ -8,9 +8,8 @@ with the Wireshare SIM7600X HAT at 1Hz, and publishes the latest sensor snapshot
 POSIX shared memory. Consumers (e.g. Python) can read the data lock-free using a sequence 
 lock.
 
-This repository also includes a minimal RP2040 SPI slave firmware
-(`pico-firmware/spi_slave.c`) that transmits reads analog sensor data and sends as
-HDLC-framed packets over SPI.
+This repository also includes a minimal RP2040 SPI slave firmware in directory
+(`/pico_firmware`) that reads sensor data and sends as HDLC-framed packets.
 
 The system is designed to be extended as additional sensors are brought online.
 
@@ -21,38 +20,37 @@ The system is designed to be extended as additional sensors are brought online.
 ```python
 # read_snapshot_dict() returns:
 {
-    "seq": int,               # read_snapshot()[0]
-    "global_ts": int,         # read_snapshot()[1][0]
+    "seq": int,                     # read_snapshot()[0]
+    "global_ts": int,               # read_snapshot()[1][0]
     "power": {
-        "ts": int,            # read_snapshot()[1][1]
-        "current": float,     # read_snapshot()[1][2]
-        "voltage": float,     # read_snapshot()[1][3]
+        "ts": int,                  # read_snapshot()[1][1]
+        "current": float,           # read_snapshot()[1][2]
+        "voltage": float,           # read_snapshot()[1][3]
     },
-    "driver": { 
-        "ts": int,            # read_snapshot()[1][4]
-        "throttle": float,    # read_snapshot()[1][5]
-        "velocity": float,    # read_snapshot()[1][6]
-        "turn_angle": float,  # read_snapshot()[1][7]
+    "steering": { 
+        "ts": int,                  # read_snapshot()[1][4]
+        "brake_pressure": float,    # read_snapshot()[1][5]
+        "turn_angle": float,        # read_snapshot()[1][6]
     },
     "rpm_front": {
-        "ts": int,            # read_snapshot()[1][8]
-        "rpm_left": float,    # read_snapshot()[1][9]
-        "rpm_right": float,   # read_snapshot()[1][10]
+        "ts": int,                  # read_snapshot()[1][7]
+        "rpm_left": float,          # read_snapshot()[1][8]
+        "rpm_right": float,         # read_snapshot()[1][9]
     },
     "rpm_back": {
-        "ts": int,            # read_snapshot()[1][11]
-        "rpm_left": float,    # read_snapshot()[1][12]
-        "rpm_right": float,   # read_snapshot()[1][13]
+        "ts": int,                  # read_snapshot()[1][10]
+        "rpm_left": float,          # read_snapshot()[1][11]
+        "rpm_right": float,         # read_snapshot()[1][12]
     },
     "gps": {                  
-        "ts": int,            # read_snapshot()[1][14]
-        "lat": float,         # read_snapshot()[1][15]
-        "long": float,        # read_snapshot()[1][16]
+        "ts": int,                  # read_snapshot()[1][13]
+        "lat": float,               # read_snapshot()[1][14]
+        "long": float,              # read_snapshot()[1][15]
     },
     "motor": {
-        "ts": int,            # read_snapshot()[1][17]
-        "rpm": float,         # read_snapshot()[1][18]
-        "throttle": float,    # read_snapshot()[1][19]
+        "ts": int,                  # read_snapshot()[1][16]
+        "rpm": float,               # read_snapshot()[1][17]
+        "throttle": float,          # read_snapshot()[1][18]
     },
 }
 ```
@@ -105,13 +103,13 @@ All timestamps are in microseconds.
 
 Proposed SPI setup for UC26:
 
-| CS GPIO | Description          | Format                     |
-|---------|----------------------|----------------------------|
-| 22      | Power Monitor      | u32 ts + float current + float voltage    |
-| 23      | Driver              | u32 ts + float throttle + float brake + float turn_angle  |
-| 24      | Front RPM       | u32 ts + float rpm_left + float rpm_right   |
-| 25      | Back RPM        | u32 ts + float rpm_left + float rpm_right   |
-| 26      | Motor Controller | u32 ts + float rpm + float throttle |
+| CS GPIO | Description          | Format                                                    |
+|---------|----------------------|-----------------------------------------------------------|
+| 22      | Power Monitor        | u32 ts + float current + float voltage                    |
+| 23      | Steering             | u32 ts +  float brake_pressure + float turn_angle         |
+| 24      | Front RPM            | u32 ts + float rpm_left + float rpm_right                 |
+| 25      | Back RPM             | u32 ts + float rpm_left + float rpm_right                 |
+| 26      | Motor Controller     | u32 ts + float rpm + float throttle                       |
 
 Bus: `/dev/spidev0.0`
 

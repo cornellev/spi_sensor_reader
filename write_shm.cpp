@@ -30,6 +30,14 @@ constexpr const char *SPI_DEVICE = "/dev/spidev0.0";
 
 static constexpr int CS_PINS[5] = {22, 23, 24, 25, 26};
 
+// Boards:
+// RPM (fl, fr), RPM (bl, br), Joulemeter (current, voltage), Steering (brake pressure, steer angle), Motor (rpm, throttle)
+// 22 - Power
+// 23 - Steering
+// 24 - RPM front
+// 25 - RPM back
+// 26 - Motor
+
 constexpr float NANF = (std::nanf("1"));
 
 static inline uint64_t now_us() {
@@ -147,7 +155,7 @@ static bool decode_hdlc_frame(const std::vector<uint8_t> &rx, size_t payload_len
 }
 
 #pragma pack(push, 1)
-struct Power {
+struct Power { // All from Power Pico
     uint32_t ts;
     float current;
     float voltage;
@@ -155,16 +163,15 @@ struct Power {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct Driver {
+struct Steering { // All from Steering Pico
     uint32_t ts;
-    float throttle;
-    float brake;
+    float brake_pressure;
     float turn_angle;
 };
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct RPM {
+struct RPM { // All from RPM Picos
     uint32_t ts;
     float rpm_left;
     float rpm_right;
@@ -172,7 +179,7 @@ struct RPM {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct GPS {
+struct GPS { // All from GPS thread reading SIM7600
     uint32_t ts;
     float gps_lat;
     float gps_long;
@@ -180,7 +187,7 @@ struct GPS {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct Motor {
+struct Motor { // All from Motor Pico
     uint32_t ts;
     float rpm;
     float throttle;
@@ -188,10 +195,10 @@ struct Motor {
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct SensorSnapshot { // 12 * 5 + 16 + 8 = 84 bytes
+struct SensorSnapshot { // 8 + 6 * 12 = 80 bytes
     uint64_t global_ts;
     Power power_snap;
-    Driver driver_snap;
+    Steering steering_snap;
     RPM rpm_snap_front;
     RPM rpm_snap_back;
     GPS gps_snap;
@@ -200,7 +207,7 @@ struct SensorSnapshot { // 12 * 5 + 16 + 8 = 84 bytes
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct SharedBlock { // 88 bytes
+struct SharedBlock { // 84 bytes
     std::atomic<uint32_t> seq;
     SensorSnapshot data;
 };
@@ -210,12 +217,12 @@ static_assert(sizeof(std::atomic<uint32_t>) == 4, "atomic<uint32_t> must be 4 by
 static_assert(offsetof(SharedBlock, seq) == 0, "seq must be at offset 0");
 static_assert(offsetof(SharedBlock, data) == 4, "data must start immediately after seq");
 static_assert(sizeof(Power) == 12);
-static_assert(sizeof(Driver) == 16);
+static_assert(sizeof(Steering) == 12);
 static_assert(sizeof(RPM) == 12);
 static_assert(sizeof(GPS) == 12);
 static_assert(sizeof(Motor) == 12);
-static_assert(sizeof(SensorSnapshot) == 84);
-static_assert(sizeof(SharedBlock) == 88);
+static_assert(sizeof(SensorSnapshot) == 80);
+static_assert(sizeof(SharedBlock) == 84);
 
 static constexpr const char *SHM_NAME = "/sensor_shm";
 
@@ -388,17 +395,6 @@ class MasterShm {
         shm_->seq.store(s + 2, std::memory_order_release); // even => stable
     }
 
-    // Currently unused float unpacking helper
-    // static float unpack_float(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3) {
-    //   uint32_t bits = (static_cast<uint32_t>(b3) << 24) |
-    //                   (static_cast<uint32_t>(b2) << 16) |
-    //                   (static_cast<uint32_t>(b1) <<  8) |
-    //                   (static_cast<uint32_t>(b0));
-    //   float result;
-    //   std::memcpy(&result, &bits, sizeof(result));
-    //   return result;
-    // }
-
     void select_cs(int chipSelect) {
         for (int i = 1; i < 6; i++) {
             gpio_write(pi_, CS_PINS[i - 1], chipSelect == i ? 0 : 1);
@@ -547,11 +543,16 @@ class MasterShm {
     }
 
     void timer_callback() {
-        auto power_p = readFramePayload(1, sizeof(Power));   // 12
-        auto driver_p = readFramePayload(2, sizeof(Driver)); // 16
-        auto rpm_f_p = readFramePayload(3, sizeof(RPM));     // 12
-        auto rpm_b_p = readFramePayload(4, sizeof(RPM));     // 12
-        auto motor_p = readFramePayload(5, sizeof(Motor));   // 12
+        auto power_p = readFramePayload(1, sizeof(Power));       // 12
+        auto steering_p = readFramePayload(2, sizeof(Steering)); // 12
+        auto rpm_f_p = readFramePayload(3, sizeof(RPM));         // 12
+        auto rpm_b_p = readFramePayload(4, sizeof(RPM));         // 12
+        auto motor_p = readFramePayload(5, sizeof(Motor));       // 12
+
+        // Power: ts (4), current (4), voltage (4)
+        // Steering: ts (4), brake_pressure (4), turn_angle (4)
+        // RPM: ts (4), rpm_left (4), rpm_right (4)
+        // Motor: ts (4), rpm (4), throttle (4)
 
         SensorSnapshot snap{};
 
@@ -572,17 +573,15 @@ class MasterShm {
             snap.power_snap.voltage = NANF;
         }
 
-        if (driver_p.size() == sizeof(Driver)) {
-            const uint8_t *p = driver_p.data();
-            snap.driver_snap.ts = u32_le_bytes(p + 0);
-            snap.driver_snap.throttle = f32_le_bytes(p + 4);
-            snap.driver_snap.brake = f32_le_bytes(p + 8);
-            snap.driver_snap.turn_angle = f32_le_bytes(p + 12);
+        if (steering_p.size() == sizeof(Steering)) {
+            const uint8_t *p = steering_p.data();
+            snap.steering_snap.ts = u32_le_bytes(p + 0);
+            snap.steering_snap.brake_pressure = f32_le_bytes(p + 4);
+            snap.steering_snap.turn_angle = f32_le_bytes(p + 8);
         } else {
-            snap.driver_snap.ts = 0;
-            snap.driver_snap.throttle = NANF;
-            snap.driver_snap.brake = NANF;
-            snap.driver_snap.turn_angle = NANF;
+            snap.steering_snap.ts = 0;
+            snap.steering_snap.brake_pressure = NANF;
+            snap.steering_snap.turn_angle = NANF;
         }
 
         if (rpm_f_p.size() == sizeof(RPM)) {
