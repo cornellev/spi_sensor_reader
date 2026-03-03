@@ -245,7 +245,7 @@ static void irq_handler(uint gpio, uint32_t events) {
 
         case PIN_CS:
             if (events & GPIO_IRQ_EDGE_FALL) {
-                answer_SPI(payload, frame_buf, &motor_l_rpm, &motor_r_rpm);
+                answer_SPI(payload, frame_buf);
 
             } else if (events & GPIO_IRQ_EDGE_RISE) {
                 if (data_chan >= 0) { dma_channel_abort(data_chan); }
