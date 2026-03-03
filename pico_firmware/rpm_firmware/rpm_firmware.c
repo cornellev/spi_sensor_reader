@@ -17,7 +17,8 @@
 #define PIN_TX   19
 #define LED      25
 
-#define HALL_PIN 2
+#define HALL_PIN_L 2
+#define HALL_PIN_R 3
 #define PPR      32
 
 #define MIN_RPM  1.0f
@@ -34,8 +35,10 @@
     ( ( ( ((PAYLOAD_LEN + CRC_LEN) * 8u * 6u + 4u) / 5u ) + 16u ) + 7u ) / 8u \
 )
 
-static volatile uint32_t last_rise_us = 0;
-static volatile float motor_rpm = 0.0f;
+static volatile uint32_t last_rise_l_us = 0;
+static volatile uint32_t last_rise_r_us = 0;
+static volatile float motor_l_rpm = 0.0f;
+static volatile float motor_r_rpm = 0.0f;
 
 static int data_chan = -1;
 
@@ -145,76 +148,107 @@ static void configure_dma(void) {
     );
 }
 
-static void check_rpm_zero(void) {
+// Checks if RPMs have been stale for too long and sets them to 0 if so
+static void check_rpms_zero() {
     uint32_t now = (uint32_t)time_us_64();
-    if (motor_rpm > 0.0f && (now - last_rise_us) > RPM_TIMEOUT_US) {
-        uint32_t save = save_and_disable_interrupts();
-        motor_rpm = 0.0f;
-        restore_interrupts(save);
+
+    bool is_zero_l = (motor_l_rpm > 0.0f) &&
+                        ((uint32_t)(now - last_rise_l_us) > RPM_TIMEOUT_US);
+    bool is_zero_r = (motor_r_rpm > 0.0f) &&
+                        ((uint32_t)(now - last_rise_r_us) > RPM_TIMEOUT_US);
+
+    if (!is_zero_l && !is_zero_r) return;
+
+    // Typically both would be stale at the same time, so large critical section is preferred here.
+    uint32_t save = save_and_disable_interrupts();
+    if (motor_l_rpm > 0.0f &&
+        (uint32_t)(now - last_rise_l_us) > RPM_TIMEOUT_US) {
+        motor_l_rpm = 0.0f;
     }
+
+    if (motor_r_rpm > 0.0f &&
+        (uint32_t)(now - last_rise_r_us) > RPM_TIMEOUT_US) {
+        motor_r_rpm = 0.0f;
+    }
+    restore_interrupts(save);
+
+}
+
+// Updates the given motor RPM based on a new hall sensor rise, using the last rise time to compute period
+static void update_rpm(volatile uint32_t* last_rise_us, volatile float* motor_rpm) {
+    uint32_t now = (uint32_t)time_us_64();
+
+    if (*last_rise_us == 0) {
+        *last_rise_us = now;
+        *motor_rpm = 0.0f;
+        return;
+    }
+
+    uint32_t period_us = now - *last_rise_us;
+    *last_rise_us = now;
+
+    float raw_rpm = 60.0e6f / ((float)period_us * (float)PPR);
+
+    if (raw_rpm >= MIN_RPM && raw_rpm <= MAX_RPM) {
+        *motor_rpm = raw_rpm;
+    }
+}
+
+// Answers an SPI read by building a frame with the current timestamp and RPMs and starting DMA to send it
+static void answer_SPI(uint8_t* payload, uint8_t* frame_buf) {
+    if (data_chan >= 0) { dma_channel_abort(data_chan); }
+    gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
+
+    // Clear SPI overrun and drain RX FIFO
+    spi_get_hw(SPI_PORT)->icr = SPI_SSPICR_RORIC_BITS;
+    while (spi_is_readable(SPI_PORT)) { (void)spi_get_hw(SPI_PORT)->dr; }
+        
+    uint32_t ts = (uint32_t)time_us_64(); // pmo
+
+    // Save locally in case of concurrent updates while building frame)
+    // uint32_t save = save_and_disable_interrupts();
+    float rpm_l = motor_l_rpm;
+    float rpm_r = motor_r_rpm;
+    // restore_interrupts(save);
+
+    pack_u32_le(&payload[0], ts);
+    pack_f32_le(&payload[4], rpm_l);
+    pack_f32_le(&payload[8], rpm_r);
+
+    uint32_t len = build_hdlc_frame(payload, PAYLOAD_LEN, frame_buf);
+    if (len == 0) {
+        set_gpio_hi_z(PIN_TX); // to avoid sending garbage if frame building fails
+        return;
+    }
+
+    frame_len = len;
+
+    dma_channel_set_read_addr(data_chan, frame_buf, false);
+    dma_channel_set_trans_count(data_chan, frame_len, true);
 }
 
 static void irq_handler(uint gpio, uint32_t events) {
 
     switch (gpio) {
 
-        case HALL_PIN:
+        case HALL_PIN_L:
             if (events & GPIO_IRQ_EDGE_RISE) {
+                update_rpm(&last_rise_l_us, &motor_l_rpm);
+            }
+            break;
 
-                uint32_t now = (uint32_t)time_us_64();
-
-                if (last_rise_us == 0) {
-                    last_rise_us = now;
-                    motor_rpm = 0.0f;
-                    break;
-                }
-
-                uint32_t period_us = now - last_rise_us;
-                last_rise_us = now;
-
-                float raw_rpm = 60.0e6f / ((float)period_us * (float)PPR);
-
-                if (raw_rpm >= MIN_RPM && raw_rpm <= MAX_RPM) {
-                    motor_rpm = raw_rpm;
-                }
+        case HALL_PIN_R:
+            if (events & GPIO_IRQ_EDGE_RISE) {
+                update_rpm(&last_rise_r_us, &motor_r_rpm);
             }
             break;
 
         case PIN_CS:
             if (events & GPIO_IRQ_EDGE_FALL) {
-
-                if (data_chan >= 0) dma_channel_abort(data_chan);
-
-                gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
-
-                // Clear SPI overrun and drain RX FIFO
-                spi_get_hw(SPI_PORT)->icr = SPI_SSPICR_RORIC_BITS;
-                while (spi_is_readable(SPI_PORT))
-                    (void)spi_get_`hw(SPI_PORT)->dr;
-
-                uint32_t ts = (uint32_t)time_us_64();
-                float rpm = motor_rpm;
-
-                pack_u32_le(&payload[0], ts);
-                pack_f32_le(&payload[4], rpm);
-                pack_f32_le(&payload[8], rpm);
-
-                uint32_t len = build_hdlc_frame(payload, PAYLOAD_LEN, frame_buf);
-                if (len == 0) {
-                    set_gpio_hi_z(PIN_TX);
-                    break;
-                }
-
-                frame_len = len;
-
-                dma_channel_set_read_addr(data_chan, frame_buf, false);
-                dma_channel_set_trans_count(data_chan, frame_len, true);
+                answer_SPI(payload, frame_buf, &motor_l_rpm, &motor_r_rpm);
 
             } else if (events & GPIO_IRQ_EDGE_RISE) {
-
-                if (data_chan >= 0)
-                    dma_channel_abort(data_chan);
-
+                if (data_chan >= 0) { dma_channel_abort(data_chan); }
                 set_gpio_hi_z(PIN_TX);
             }
 
@@ -233,14 +267,12 @@ static void init_all(void) {
     gpio_put(LED, 1);
 
     irq_set_enabled(IO_IRQ_BANK0, true);
-    gpio_init(HALL_PIN);
-    gpio_set_dir(HALL_PIN, GPIO_IN);
-    gpio_set_irq_enabled_with_callback( 
-        HALL_PIN, 
-        GPIO_IRQ_EDGE_RISE, 
-        true,
-        &irq_handler
-    );
+    gpio_init(HALL_PIN_L);
+    gpio_init(HALL_PIN_R);
+    gpio_set_dir(HALL_PIN_L, GPIO_IN);
+    gpio_set_dir(HALL_PIN_R, GPIO_IN);
+    gpio_set_irq_enabled_with_callback(HALL_PIN_L, GPIO_IRQ_EDGE_RISE, true, &irq_handler);
+    gpio_set_irq_enabled(HALL_PIN_R, GPIO_IRQ_EDGE_RISE, true);
 
     spi_init(SPI_PORT, 1 * 1000 * 1000);
     spi_set_slave(SPI_PORT, true);
@@ -254,12 +286,7 @@ static void init_all(void) {
     gpio_init(PIN_CS);
     gpio_set_dir(PIN_CS, GPIO_IN);
     gpio_pull_up(PIN_CS);
-    gpio_set_irq_enabled_with_callback(
-        PIN_CS,
-        GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE,
-        true,
-        &irq_handler
-    );
+    gpio_set_irq_enabled( PIN_CS, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true);
 
     // gpio_init(PIN_TX);
     // set_gpio_hi_z(PIN_TX);
@@ -271,8 +298,8 @@ static void init_all(void) {
 int main(void) {
     init_all();
     while (true) {
-        // printf("%d\n", gpio_get(HALL_PIN));
-        check_rpm_zero();
+        // printf("%f, %f\n", motor_l_rpm, motor_r_rpm);
+        check_rpms_zero();
         tight_loop_contents();
     }
 }
