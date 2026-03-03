@@ -22,7 +22,7 @@
 constexpr uint8_t GPS_POWERKEY = 8;
 
 static constexpr uint8_t FLAG_BYTE = 0x7E;
-static constexpr int SPI_READ_MAX = 32; // bytes clocked per transaction (>= worst-case frame)
+static constexpr int SPI_READ_MAX = 64; // >= worst-case frame
 
 constexpr uint8_t SPI_MODE = 1;         // CPOL=0, CPHA=1
 constexpr uint32_t SPI_SPEED = 1000000; // 1 MHz
@@ -68,87 +68,102 @@ static inline float f32_le_bytes(const uint8_t *p) {
     return out;
 }
 
-// Returns true on success and fills payload_out with the decoded payload
-static bool decode_hdlc_frame(const std::vector<uint8_t> &rx, size_t payload_len,
-                              std::vector<uint8_t> &payload_out) {
-    payload_out.clear();
-    if (payload_len == 0) {
-        return false;
-    }
+static inline uint8_t get_bit_msb(const std::vector<uint8_t>& data, int bit_index) {
+    const int byte_i = bit_index >> 3;
+    const int bit_i  = bit_index & 7;
+    if (byte_i < 0 || (size_t)byte_i >= data.size()) return 0;
+    return (data[(size_t)byte_i] >> (7 - bit_i)) & 1u;
+}
 
-    int first_flag_end_bit = -1; // bit index where first flag ends (inclusive)
-    int second_flag_start_bit =
-        -1; // bit index where second flag starts (inclusive, i.e., last bit of flag)
+static bool find_two_flags(const std::vector<uint8_t> &rx,
+                           int *first_flag_end_bit,
+                           int *second_flag_end_bit) {
+    *first_flag_end_bit = -1;
+    *second_flag_end_bit = -1;
+
     uint8_t sh = 0;
-    int bit_index = 0;
+    const int nbits = (int)rx.size() * 8;
 
-    auto get_bit_msb = [&](int bi) -> uint8_t {
-        int byte_i = bi >> 3;
-        int bit_i = bi & 7;
-        if ((size_t)byte_i >= rx.size())
-            return 0;
-        return (rx[byte_i] >> (7 - bit_i)) & 1u;
-    };
-
-    for (bit_index = 0; bit_index < (int)rx.size() * 8; bit_index++) {
-        sh = (uint8_t)((sh << 1) | get_bit_msb(bit_index));
+    for (int bi = 0; bi < nbits; bi++) {
+        sh = (uint8_t)((sh << 1) | get_bit_msb(rx, bi));
         if (sh == FLAG_BYTE) {
-            if (first_flag_end_bit < 0) {
-                first_flag_end_bit = bit_index;
+            if (*first_flag_end_bit < 0) {
+                *first_flag_end_bit = bi; // last bit of first flag
                 sh = 0;
             } else {
-                second_flag_start_bit = bit_index;
-                break;
+                *second_flag_end_bit = bi; // last bit of second flag
+                return true;
             }
         }
     }
+    return false;
+}
 
-    if (first_flag_end_bit < 0 || second_flag_start_bit < 0)
-        return false;
 
-    int data_start_bit = first_flag_end_bit + 1;
-    int data_end_bit_exclusive = second_flag_start_bit - 7;
-
-    if (data_end_bit_exclusive <= data_start_bit)
-        return false;
-
-    const size_t want_bytes = payload_len + 4;
-    std::vector<uint8_t> out(want_bytes, 0);
-
-    size_t out_bitpos = 0;
+static bool bit_unstuff_range(const std::vector<uint8_t>& in,
+                              int start_bit,
+                              int end_bit_exclusive,
+                              uint8_t* out,
+                              size_t out_cap_bytes,
+                              size_t* out_bitpos) {
     int ones = 0;
 
-    for (int bi = data_start_bit; bi < data_end_bit_exclusive && out_bitpos < want_bytes * 8;
-         bi++) {
-        uint8_t bit = get_bit_msb(bi);
+    for (int bi = start_bit; bi < end_bit_exclusive && *out_bitpos < out_cap_bytes * 8; bi++) {
+        const uint8_t bit = get_bit_msb(in, bi);
 
+        // If we've already seen five 1s, this bit MUST be a stuffed 0 and must be skipped.
         if (ones == 5) {
-            if (bit != 0) {
-                return false;
-            }
+            if (bit != 0) return false; // invalid stuffing
             ones = 0;
             continue;
         }
 
-        size_t byte_i = out_bitpos >> 3;
-        size_t bit_i = out_bitpos & 7;
-        if (bit)
-            out[byte_i] |= (uint8_t)(1u << (7 - bit_i));
-        out_bitpos++;
+        const size_t byte_i = (*out_bitpos) >> 3;
+        const size_t bit_i  = (*out_bitpos) & 7;
+        if (byte_i >= out_cap_bytes) return false;
 
-        if (bit)
-            ones++;
-        else
-            ones = 0;
+        if (bit) out[byte_i] |= (uint8_t)(1u << (7 - bit_i));
+        (*out_bitpos)++;
+
+        if (bit) ones++;
+        else     ones = 0;
     }
 
-    if (out_bitpos < want_bytes * 8)
-        return false;
+    return true;
+}
 
-    uint32_t crc_rx = u32_le_bytes(out.data() + payload_len);
-    uint32_t crc_ok = crc32_ieee(out.data(), payload_len);
-    if (crc_rx != crc_ok)
+static bool decode_frame(const std::vector<uint8_t>& rx,
+                         size_t payload_len,
+                         std::vector<uint8_t>& payload_out) {
+    payload_out.clear();
+    if (payload_len == 0) return false;
+
+    // Find flags and compute where the data bits are.
+    int first_flag_end_bit;
+    int second_flag_end_bit;
+    if (!find_two_flags(rx, &first_flag_end_bit, &second_flag_end_bit)) return false;
+
+    const int data_start_bit = first_flag_end_bit + 1;
+    const int data_end_bit_exclusive = second_flag_end_bit - 7;
+
+    if (data_end_bit_exclusive <= data_start_bit) return false;
+
+    const size_t want_bytes = payload_len + 4; // payload + crc32
+
+    // Unstuff bits in the data range into out[], which should now contain payload || crc_le
+    std::vector<uint8_t> out(want_bytes, 0);
+    size_t out_bitpos = 0;
+    if (!bit_unstuff_range(rx, data_start_bit, data_end_bit_exclusive,
+                           out.data(), out.size(), &out_bitpos)) {
         return false;
+    }
+
+    if (out_bitpos < want_bytes * 8) return false;
+
+    // Check CRC
+    const uint32_t crc_rx = u32_le_bytes(out.data() + payload_len);
+    const uint32_t crc_ok = crc32_ieee(out.data(), payload_len);
+    if (crc_rx != crc_ok) return false;
 
     payload_out.assign(out.begin(), out.begin() + (ptrdiff_t)payload_len);
     return true;
@@ -429,7 +444,9 @@ class MasterShm {
         deselect_all_cs();
 
         std::vector<uint8_t> payload;
-        decode_hdlc_frame(rx, payload_len, payload);
+        if (!decode_frame(rx, payload_len, payload)) {
+            payload.clear();
+        }
         return payload;
     }
 

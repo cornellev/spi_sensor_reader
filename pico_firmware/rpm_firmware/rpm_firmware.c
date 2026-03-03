@@ -88,39 +88,40 @@ static inline bool push_bit(uint8_t* out, uint32_t* bitpos, uint8_t bit) {
     return true;
 }
 
-static uint32_t build_hdlc_frame(const uint8_t* pl, size_t pl_len, uint8_t* out) {
+static bool bit_stuff(const uint8_t* in, size_t in_len, uint8_t* out, uint32_t* bitpos) {
+    int ones = 0;
+    for (size_t i = 0; i < in_len; i++) {
+        for (int b = 7; b >= 0; b--) {
+            uint8_t bit = (in[i] >> b) & 1u;
+            if (!push_bit(out, bitpos, bit)) return false;
+
+            if (bit) ones++; else ones = 0;
+
+            if (ones == 5) {
+                if (!push_bit(out, bitpos, 0)) return false;
+                ones = 0;
+            }
+        }
+    }
+    return true;
+}
+
+static uint32_t build_frame(const uint8_t* pl, uint8_t* out) {
     // Build tmp = payload || crc_le
     uint8_t tmp[PAYLOAD_LEN + CRC_LEN];
-    memcpy(tmp, pl, pl_len);
+    memcpy(tmp, pl, PAYLOAD_LEN);
 
-    uint32_t crc = crc32_ieee(pl, pl_len);
-    tmp[pl_len + 0] = (uint8_t)((crc >> 0)  & 0xFF);
-    tmp[pl_len + 1] = (uint8_t)((crc >> 8)  & 0xFF);
-    tmp[pl_len + 2] = (uint8_t)((crc >> 16) & 0xFF);
-    tmp[pl_len + 3] = (uint8_t)((crc >> 24) & 0xFF);
+    uint32_t crc = crc32_ieee(pl, PAYLOAD_LEN);
+    pack_u32_le(&tmp[PAYLOAD_LEN], crc);
 
     memset(out, 0, FRAME_MAX_BYTES);
     out[0] = FLAG_BYTE;
 
     uint32_t bitpos = 8; // after first flag byte
-    int ones = 0;
 
-    for (size_t i = 0; i < (pl_len + CRC_LEN); i++) {
-        for (int b = 7; b >= 0; b--) {
-            uint8_t bit = (tmp[i] >> b) & 1u;
+    if (!bit_stuff(tmp, PAYLOAD_LEN + CRC_LEN, out, &bitpos)) return 0;
 
-            if (!push_bit(out, &bitpos, bit)) return 0;
-
-            if (bit) ones++;
-            else ones = 0;
-
-            if (ones == 5) {
-                if (!push_bit(out, &bitpos, 0)) return 0; // stuffed 0
-                ones = 0;
-            }
-        }
-    }
-
+    // Basically take the ceiling of bitpos/8 and add one more byte for the trailing flag
     uint32_t bytes = (bitpos + 7u) >> 3;
     if (bytes + 1u > FRAME_MAX_BYTES) return 0;
 
@@ -215,7 +216,7 @@ static void answer_SPI(uint8_t* payload, uint8_t* frame_buf) {
     pack_f32_le(&payload[4], rpm_l);
     pack_f32_le(&payload[8], rpm_r);
 
-    uint32_t len = build_hdlc_frame(payload, PAYLOAD_LEN, frame_buf);
+    uint32_t len = build_frame(payload, frame_buf);
     if (len == 0) {
         set_gpio_hi_z(PIN_TX); // to avoid sending garbage if frame building fails
         return;
@@ -245,7 +246,7 @@ static void irq_handler(uint gpio, uint32_t events) {
 
         case PIN_CS:
             if (events & GPIO_IRQ_EDGE_FALL) {
-                answer_SPI(payload, frame_buf, &motor_l_rpm, &motor_r_rpm);
+                answer_SPI(payload, frame_buf);
 
             } else if (events & GPIO_IRQ_EDGE_RISE) {
                 if (data_chan >= 0) { dma_channel_abort(data_chan); }

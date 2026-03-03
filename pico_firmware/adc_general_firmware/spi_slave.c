@@ -36,12 +36,12 @@
 //   crc     = 4B
 //   stuffing worst-case: +1 bit per 5 bits
 //   flags   = 2 bytes (never stuffed)
-#define PAYLOAD_MAX_BYTES (4u + 4u * (unsigned)N_CH)
+#define PAYLOAD_LEN (4u + 4u * (unsigned)N_CH)
 #define FRAME_MAX_BYTES ( \
-    ( ( ( ((PAYLOAD_MAX_BYTES + 4u) * 8u * 6u + 4u) / 5u ) + 16u ) + 7u ) / 8u \
+    ( ( ( ((PAYLOAD_LEN + 4u) * 8u * 6u + 4u) / 5u ) + 16u ) + 7u ) / 8u \
 )
 
-uint8_t payload_buf[PAYLOAD_MAX_BYTES];
+uint8_t payload_buf[PAYLOAD_LEN];
 uint8_t frame_buf[FRAME_MAX_BYTES];
 
 static int data_chan = -1; // DMA channel for SPI TX 
@@ -77,8 +77,18 @@ void configure_dma(void) {
         false);
 }
 
-// IEEE CRC32
-uint32_t calculate_crc32(const uint8_t *data, size_t length) {
+static inline void pack_u32_le(uint8_t* dst, uint32_t x) {
+    dst[0] = (uint8_t)(x & 0xFF);
+    dst[1] = (uint8_t)((x >> 8) & 0xFF);
+    dst[2] = (uint8_t)((x >> 16) & 0xFF);
+    dst[3] = (uint8_t)((x >> 24) & 0xFF);
+}
+
+static inline void pack_f32_le(uint8_t* dst, float f) {
+    memcpy(dst, &f, 4);
+}
+
+uint32_t crc32_ieee(const uint8_t *data, size_t length) {
     uint32_t crc = 0xFFFFFFFF;
     for (size_t i = 0; i < length; i++) {
         crc ^= data[i];
@@ -92,55 +102,34 @@ uint32_t calculate_crc32(const uint8_t *data, size_t length) {
     return ~crc;
 }
 
-// Writes bits into frame_buf sequentially; bitpos 0 maps to bit 7 of byte 0.
-bool put_bit(uint8_t *out, size_t out_cap_bytes, int *bitpos, uint8_t bit) {
-    int bp = *bitpos;
-    int byte_i = bp >> 3;
-    int bit_i = bp & 7;
-    if ((size_t)byte_i >= out_cap_bytes)
-        return false;
-
-    if (bit)
-        out[byte_i] |= (uint8_t)(1u << (7 - bit_i));
-    *bitpos = bp + 1;
+static inline bool push_bit(uint8_t* out, uint32_t* bitpos, uint8_t bit) {
+    uint32_t byte_i = (*bitpos) >> 3;
+    uint32_t bit_i  = (*bitpos) & 7;
+    if (byte_i >= FRAME_MAX_BYTES) return false;
+    if (bit) out[byte_i] |= (uint8_t)(1u << (7 - bit_i));
+    (*bitpos)++;
     return true;
 }
 
-bool put_byte_msb(uint8_t *out, size_t cap, int *bitpos, uint8_t v) {
-    for (int b = 7; b >= 0; b--) {
-        if (!put_bit(out, cap, bitpos, (v >> b) & 1u))
-            return false;
-    }
-    return true;
-}
+static bool bit_stuff(const uint8_t* in, size_t len,
+                      uint8_t* out, uint32_t* bitpos) {
+    int ones = 0;
 
-bool put_bytes_stuffed(uint8_t *out, size_t cap, int *bitpos, const uint8_t *data, size_t nbytes,
-                       int *ones) {
-    for (size_t i = 0; i < nbytes; i++) {
-        uint8_t v = data[i];
+    for (size_t i = 0; i < len; i++) {
         for (int b = 7; b >= 0; b--) {
-            uint8_t bit = (v >> b) & 1u;
+            uint8_t bit = (in[i] >> b) & 1u;
+            if (!push_bit(out, bitpos, bit)) return false;
 
-            if (!put_bit(out, cap, bitpos, bit))
-                return false;
+            if (bit) ones++;
+            else     ones = 0;
 
-            if (bit) {
-                (*ones)++;
-                if (*ones == 5) {
-                    if (!put_bit(out, cap, bitpos, 0))
-                        return false;
-                    *ones = 0;
-                }
-            } else {
-                *ones = 0;
+            if (ones == 5) {
+                if (!push_bit(out, bitpos, 0)) return false;
+                ones = 0;
             }
         }
     }
     return true;
-}
-
-inline int bytes_used_from_bitpos(int bitpos) {
-    return (bitpos + 7) >> 3;
 }
 
 static inline float adc_counts_to_volts(uint16_t raw) {
@@ -183,77 +172,65 @@ static float read_channel(int i) {
 
 void build_payload(uint8_t *payload, uint32_t now_us) {
     // LITTLE ENDIAN timestamp
-    payload[0] = (uint8_t)(now_us >> 0);
-    payload[1] = (uint8_t)(now_us >> 8);
-    payload[2] = (uint8_t)(now_us >> 16);
-    payload[3] = (uint8_t)(now_us >> 24);
+    pack_u32_le(&payload[0], now_us);
 
     for (int i = 0; i < N_CH; i++) {
-        // OMG i get to use a union in C! WOW.
-        union {
-            float f;
-            uint32_t u;
-        } x = {.f = read_channel(i)};
-        size_t off = 4 + (size_t)(4 * i);
-        payload[off + 0] = (uint8_t)(x.u >> 0);
-        payload[off + 1] = (uint8_t)(x.u >> 8);
-        payload[off + 2] = (uint8_t)(x.u >> 16);
-        payload[off + 3] = (uint8_t)(x.u >> 24);
+        float f = read_channel(i);
+        size_t off = 4u + 4u * (size_t)i;
+        pack_f32_le(&payload[off], f);
     }
 }
 
 // START + STUFF(payload|crc) + END
-int build_frame(uint8_t *out, const uint8_t *payload) {
-    memset(out, 0, (size_t)FRAME_MAX_BYTES);
-    int bitpos = 0;
+static uint32_t build_frame(uint8_t *out, const uint8_t *payload) {
+    // tmp = payload || crc_le
+    uint8_t tmp[PAYLOAD_LEN + 4u];
+    memcpy(tmp, payload, PAYLOAD_LEN);
 
-    // Start flag
-    if (!put_byte_msb(out, (size_t)FRAME_MAX_BYTES, &bitpos, FLAG_BYTE))
-        return -1;
+    uint32_t crc = crc32_ieee(payload, PAYLOAD_LEN);
+    pack_u32_le(&tmp[PAYLOAD_LEN], crc);
 
-    // Compute CRC
-    uint32_t crc = calculate_crc32(payload, (size_t)PAYLOAD_MAX_BYTES);
-    uint8_t crc_le[4] = {
-        (uint8_t)(crc >> 0),
-        (uint8_t)(crc >> 8),
-        (uint8_t)(crc >> 16),
-        (uint8_t)(crc >> 24),
-    };
+    memset(out, 0, FRAME_MAX_BYTES);
+    out[0] = FLAG_BYTE;
 
-    int ones = 0;
+    uint32_t bitpos = 8; // after first flag byte
+    if (!bit_stuff(tmp, sizeof(tmp), out, &bitpos)) return 0;
 
-    if (!put_bytes_stuffed(out, (size_t)FRAME_MAX_BYTES, &bitpos, payload, (size_t)PAYLOAD_MAX_BYTES, &ones))
-        return -1;
-    if (!put_bytes_stuffed(out, (size_t)FRAME_MAX_BYTES, &bitpos, crc_le, sizeof(crc_le), &ones))
-        return -1;
+    // Basically take the ceiling of bitpos/8 and add one more byte for the trailing flag
+    uint32_t bytes = (bitpos + 7u) >> 3;
+    if (bytes + 1u > FRAME_MAX_BYTES) return 0;
 
-    // End flag
-    if (!put_byte_msb(out, (size_t)FRAME_MAX_BYTES, &bitpos, FLAG_BYTE))
-        return -1;
+    // Put trailing flag at the next byte boundary
+    out[bytes] = FLAG_BYTE;
+    return bytes + 1u;
+}
 
-    return bytes_used_from_bitpos(bitpos);
+static void answer_SPI(uint8_t* payload, uint8_t* frame_buf) {
+    if (data_chan >= 0) dma_channel_abort(data_chan);
+    gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
+
+    spi_get_hw(SPI_PORT)->icr = SPI_SSPICR_RORIC_BITS;
+    while (spi_is_readable(SPI_PORT))
+        (void)spi_get_hw(SPI_PORT)->dr;
+
+    uint32_t now_us = (uint32_t)time_us_64();
+
+    build_payload(payload_buf, now_us);
+    uint32_t frame_len = build_frame(frame_buf, payload_buf);
+    if (frame_len == 0) {
+        set_gpio_hi_z(PIN_TX); // to avoid sending garbage if frame building fails
+        return;
+    }
+
+    dma_channel_set_read_addr(data_chan, frame_buf, false);
+    dma_channel_set_trans_count(data_chan, (uint32_t)frame_len, true);
 }
 
 void irq_handler(uint gpio, uint32_t events) {
     if (events & GPIO_IRQ_EDGE_FALL) {
-        if (data_chan >= 0) dma_channel_abort(data_chan);
-        gpio_set_function(PIN_TX, GPIO_FUNC_SPI);
-
-        spi_get_hw(SPI_PORT)->icr = SPI_SSPICR_RORIC_BITS;
-        while (spi_is_readable(SPI_PORT))
-            (void)spi_get_hw(SPI_PORT)->dr;
-
-        uint32_t now_us = (uint32_t)time_us_64();
-
-        build_payload(payload_buf, now_us);
-        int frame_len = build_frame(frame_buf, payload_buf);
-        if (frame_len <= 0)
-            return;
-
-        dma_hw->ch[data_chan].read_addr = (uintptr_t)frame_buf;
-        dma_channel_set_trans_count(data_chan, (uint32_t)frame_len, false); // only transmit frame_len 
-        dma_start_channel_mask(1u << data_chan);
+        answer_SPI(payload_buf, frame_buf);
     } else if (events & GPIO_IRQ_EDGE_RISE) {
+        if (data_chan >= 0) { dma_channel_abort(data_chan); }
         set_gpio_hi_z(PIN_TX);
     }
 }
