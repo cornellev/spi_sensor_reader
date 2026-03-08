@@ -22,7 +22,7 @@
 constexpr uint8_t GPS_POWERKEY = 8;
 
 static constexpr uint8_t FLAG_BYTE = 0x7E;
-static constexpr int SPI_READ_MAX = 64; // >= worst-case frame
+static constexpr int SPI_READ_MAX = 64; // >> worst-case frame
 
 constexpr uint8_t SPI_MODE = 1;         // CPOL=0, CPHA=1
 constexpr uint32_t SPI_SPEED = 1000000; // 1 MHz
@@ -149,12 +149,13 @@ static bool decode_frame(const std::vector<uint8_t>& rx,
     if (data_end_bit_exclusive <= data_start_bit) return false;
 
     const size_t want_bytes = payload_len + 4; // payload + crc32
+    // important because the slaves do byte-aligned flags, so there are probably bits to throw away
 
     // Unstuff bits in the data range into out[], which should now contain payload || crc_le
     std::vector<uint8_t> out(want_bytes, 0);
     size_t out_bitpos = 0;
     if (!bit_unstuff_range(rx, data_start_bit, data_end_bit_exclusive,
-                           out.data(), out.size(), &out_bitpos)) {
+                           out.data(), want_bytes, &out_bitpos)) {
         return false;
     }
 
@@ -339,20 +340,20 @@ class MasterShm {
     bool gps_started_{false};
 
     void init_gps() {
-        sim7600.PowerOn(GPS_POWERKEY);
-
-        if (sim7600.sendATcommand("AT+CGPS=1,1", "OK", 2000) == 1) {
-            gps_started_ = true;
-            std::fprintf(stderr, "GPS started\n");
-        } else {
-            std::fprintf(stderr, "GPS failed to start\n");
+        gps_serial_ = open("/dev/serial0", O_RDONLY | O_NOCTTY);
+        if(gps_serial_ < 0) {
+        std::perror("open gps serial");
         }
+
+        std::fprintf(stdout, "gps open at: %x", gps_serial_);
 
         GPS g{};
         g.ts = 0;
         g.gps_lat = NANF;
         g.gps_long = NANF;
         publish_gps(g);
+
+        gps_started_ = true;
 
         gps_thread_ = std::thread([this]() { this->gps_loop(); });
     }
@@ -472,63 +473,38 @@ class MasterShm {
     }
 
     bool poll_gps_once(GPS &out) {
-        if (!gps_started_)
-            return false;
+        if (!gps_started_) return false;
 
-        if (sim7600.sendATcommand("AT+CGPSINFO", "+CGPSINFO:", 500) != 1) {
-            return false;
-        }
-        // Read remainder for a bounded time window
-        std::string buf;
-        buf.reserve(256);
-        uint64_t t0 = now_us();
+        char buf[256];
 
-        while (now_us() - t0 < 500000ULL) { // 500 ms max
-            while (Serial.available() > 0) {
-                buf.push_back(char(Serial.read()));
-            }
-            if (buf.find("\r\nOK") != std::string::npos || buf.find("\nOK") != std::string::npos)
-                break;
-            usleep(2000);
-        }
+        int n = read(gps_serial_, buf, sizeof(buf)-1);
+        if (n <= 0) return false;
 
-        // std::cout << buf << std::endl;
+        buf[n] = 0;
 
-        if (buf.find(",,,,") != std::string::npos)
-            return false; // no fix / empty
+        char *rmc = strstr(buf, "$GNRMC");
+        if (!rmc) return false;
 
-        // std::cout << "c2" << std::endl;
 
-        char lat_s[16]{}, lon_s[16]{};
-        char ns = 0, ew = 0;
+        double lat_ddmm, lon_ddmm;
+        char ns, ew;
 
-        if (sscanf(buf.c_str(), "%15[^,],%c,%15[^,],%c", lat_s, &ns, lon_s, &ew) != 4) {
-            std::printf("daniel cant parse data lol\n"); // insubordinate debug statement
-            std::printf("buf was: %s\n", buf.c_str());   // a better debug statement
-            return false;
+        if (sscanf(rmc, "$GNRMC,%*[^,],%*c,%lf,%c,%lf,%c",
+        &lat_ddmm, &ns, &lon_ddmm, &ew) != 4) {
+        return false;
         }
 
-        // ddmm.mmmm / dddmm.mmmm -> decimal degrees
-        double lat_ddmm = atof(lat_s);
-        double lon_dddmm = atof(lon_s);
+        int lat_deg = int(lat_ddmm / 100);
+        double lat_min = lat_ddmm - lat_deg * 100;
+        double lat = lat_deg + lat_min / 60;
 
-        int lat_deg = int(lat_ddmm / 100.0);
-        double lat_min = lat_ddmm - (lat_deg * 100.0);
-        double lat = double(lat_deg) + lat_min / 60.0;
+        int lon_deg = int(lon_ddmm / 100);
+        double lon_min = lon_ddmm - lon_deg * 100;
+        double lon = lon_deg + lon_min / 60;
 
-        int lon_deg = int(lon_dddmm / 100.0);
-        double lon_min = lon_dddmm - (lon_deg * 100.0);
-        double lon = double(lon_deg) + lon_min / 60.0;
+        if (ns == 'S') lat = -lat;
+        if (ew == 'W') lon = -lon;
 
-        if (ns == 'S')
-            lat = -lat;
-        else if (ns != 'N')
-            return false;
-
-        if (ew == 'W')
-            lon = -lon;
-        else if (ew != 'E')
-            return false;
 
         out.ts = static_cast<uint32_t>(now_us());
         out.gps_lat = static_cast<float>(lat);
@@ -547,7 +523,7 @@ class MasterShm {
 
             uint64_t t = now_us();
             if (t >= next_poll) {
-                next_poll += 1'000'000ULL;
+                next_poll += 500000ULL; // 2 Hz for GPS to test
 
                 GPS g{}; // This is fine because we don't publish failed reads
                 if (poll_gps_once(g)) {

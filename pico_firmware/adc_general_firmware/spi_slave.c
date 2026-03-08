@@ -153,7 +153,7 @@ static float read_channel(int i) {
     (void)i;
     return fake_signal_from_now();
 #else
-    uint8_t gpio = adc_gpios[i];
+    uint8_t gpio = ADC_GPIOS[i];
     if (gpio < 26 || gpio > 29)
         return (float)NAN;
 
@@ -247,7 +247,7 @@ int main() {
     adc_init();
     for (int i = 0; i < N_CH; i++) {
         // Configure GPIO for ADC 
-        adc_gpio_init(adc_gpios[i]);
+        adc_gpio_init(ADC_GPIOS[i]);
     }
 #endif
 
