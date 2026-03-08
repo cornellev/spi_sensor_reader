@@ -70,7 +70,6 @@ All timestamps are in microseconds.
 1. **Compile & run the C++ writer**
    ```bash
     g++ -O2 -std=c++17 write_shm.cpp \
-        lib/sim7x00.cpp lib/arduPi.cpp \
     -lpigpiod_if2 -lrt -pthread \
     -o shm_writer
 
