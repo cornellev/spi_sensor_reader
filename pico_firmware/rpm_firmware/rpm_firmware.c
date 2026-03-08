@@ -9,6 +9,7 @@
 #include "hardware/dma.h"
 #include "hardware/irq.h"
 #include "hardware/structs/io_bank0.h"
+#include "hardware/sync.h"
 
 #define SPI_PORT spi0
 #define PIN_RX   16
