@@ -7,7 +7,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <linux/spi/spidev.h>
-#include <gpiod.h>
+#include <pigpiod_if2.h>
 #include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -250,11 +250,17 @@ static void handle_sigint(int) {
 class MasterShm {
   public:
     MasterShm() {
-        if (!init_gpio()) {
-		    std::fprintf(stderr, "Failed to initialize GPIO via libgpiod\n");
-		    return;
-		}
-		std::fprintf(stderr, "GPIO initialized\n");
+        pi_ = pigpio_start(nullptr, nullptr);
+        if (pi_ < 0) {
+            std::fprintf(stderr, "Failed to connect to pigpiod\n");
+            return;
+        }
+        std::fprintf(stderr, "pigpio initialized\n");
+
+        for (int i = 0; i < 5; i++) {
+            set_mode(pi_, CS_PINS[i], PI_OUTPUT);
+        }
+        deselect_all_cs();
 
         spi_fd_ = open(SPI_DEVICE, O_RDWR);
         if (spi_fd_ < 0) {
@@ -267,12 +273,6 @@ class MasterShm {
             std::perror("SPI_IOC_WR_MODE");
             return;
         }
-
-		uint8_t bits = 8;
-		if (ioctl(spi_fd_, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0) {
-		    std::perror("SPI_IOC_WR_BITS_PER_WORD");
-		    return;
-		}
 
         uint32_t speed = SPI_SPEED;
         if (ioctl(spi_fd_, SPI_IOC_WR_MAX_SPEED_HZ, &speed) < 0) {
@@ -292,34 +292,17 @@ class MasterShm {
         init_gps();
     }
 
-	~MasterShm() {
-	    stop_.store(true, std::memory_order_relaxed);
-	    if (gps_thread_.joinable()) {
-	        gps_thread_.join();
-	    }
-	
-	    if (gps_serial_ >= 0) {
-	        close(gps_serial_);
-	        gps_serial_ = -1;
-	    }
-	
-	    shutdown_shm();
-	
-	    if (spi_fd_ >= 0) {
-	        close(spi_fd_);
-	        spi_fd_ = -1;
-	    }
-	
-	    if (cs_req_) {
-	        gpiod_line_request_release(cs_req_);
-	        cs_req_ = nullptr;
-	    }
-	
-	    if (gpio_chip_) {
-	        gpiod_chip_close(gpio_chip_);
-	        gpio_chip_ = nullptr;
-	    }
-	}
+    ~MasterShm() {
+        stop_.store(true, std::memory_order_relaxed);
+        if (gps_thread_.joinable())
+            gps_thread_.join();
+
+        shutdown_shm();
+        if (spi_fd_ >= 0)
+            close(spi_fd_);
+        if (pi_ >= 0)
+            pigpio_stop(pi_);
+    }
 
     bool ok() const {
         return ok_;
@@ -335,8 +318,7 @@ class MasterShm {
     }
 
   private:
-    gpiod_chip *gpio_chip_{nullptr};
-	gpiod_line_request *cs_req_{nullptr};
+    int pi_{-1};
     int spi_fd_{-1};
     bool ok_{false};
 
@@ -353,88 +335,12 @@ class MasterShm {
     bool gps_started_{false};
     int gps_serial_{-1};
 
-	bool try_open_chip(const char *path) {
-	    gpio_chip_ = gpiod_chip_open(path);
-	    return gpio_chip_ != nullptr;
-	}
-
-	bool init_gpio() {
-	    if (!try_open_chip("/dev/gpiochip0")) {
-		    if (!try_open_chip("/dev/gpiochip4")) {
-		        std::perror("gpiod_chip_open");
-		        return false;
-		    }
-		}
-		
-	    if (!gpio_chip_) {
-	        std::perror("gpiod_chip_open");
-	        return false;
-	    }
-	
-	    unsigned int offsets[5];
-	    for (int i = 0; i < 5; ++i) offsets[i] = CS_PINS[i];
-	
-	    gpiod_line_settings *settings = gpiod_line_settings_new();
-	    if (!settings) return false;
-	
-	    gpiod_line_settings_set_direction(settings, GPIOD_LINE_DIRECTION_OUTPUT);
-	    gpiod_line_settings_set_output_value(settings, GPIOD_LINE_VALUE_ACTIVE);
-	
-	    gpiod_line_config *line_cfg = gpiod_line_config_new();
-	    if (!line_cfg) {
-	        gpiod_line_settings_free(settings);
-	        return false;
-	    }
-	
-	    if (gpiod_line_config_add_line_settings(line_cfg, offsets, 5, settings) < 0) {
-	        std::perror("gpiod_line_config_add_line_settings");
-	        gpiod_line_config_free(line_cfg);
-	        gpiod_line_settings_free(settings);
-	        return false;
-	    }
-	
-	    gpiod_request_config *req_cfg = gpiod_request_config_new();
-	    if (!req_cfg) {
-	        gpiod_line_config_free(line_cfg);
-	        gpiod_line_settings_free(settings);
-	        return false;
-	    }
-	
-	    gpiod_request_config_set_consumer(req_cfg, "sensor-master");
-	
-	    cs_req_ = gpiod_chip_request_lines(gpio_chip_, req_cfg, line_cfg);
-	    if (!cs_req_) {
-		    std::perror("gpiod_chip_request_lines");
-		    gpiod_request_config_free(req_cfg);
-		    gpiod_line_config_free(line_cfg);
-		    gpiod_line_settings_free(settings);
-		    gpiod_chip_close(gpio_chip_);
-		    gpio_chip_ = nullptr;
-		    return false;
-	    }
-	
-	    gpiod_request_config_free(req_cfg);
-	    gpiod_line_config_free(line_cfg);
-	    gpiod_line_settings_free(settings);
-	
-	    deselect_all_cs();
-	    return true;
-	}
-
-
     void init_gps() {
-        gps_serial_ = open("/dev/serial0", O_RDONLY | O_NOCTTY | O_NONBLOCK);
+        gps_serial_ = open("/dev/serial0", O_RDONLY | O_NOCTTY);
             
-	    if (gps_serial_ < 0) {
-	        std::perror("Failed to open GPS serial");
-	        GPS g{};
-	        g.ts = 0;
-	        g.gps_lat = NANF;
-	        g.gps_long = NANF;
-	        publish_gps(g);
-	        gps_started_ = false;
-	        return;
-	    }
+        if(gps_serial_ < 0) {
+            std::perror("Failed to open GPS serial");
+        }
         
         std::fprintf(stdout, "GPS fd: %d\n", gps_serial_);
     
@@ -501,26 +407,17 @@ class MasterShm {
         shm_->seq.store(s + 2, std::memory_order_release); // even => stable
     }
 
+    void select_cs(int chipSelect) {
+        for (int i = 1; i < 6; i++) {
+            gpio_write(pi_, CS_PINS[i - 1], chipSelect == i ? 0 : 1);
+        }
+    }
+
     void deselect_all_cs() {
-	    if (!cs_req_) return;
-	    for (int i = 0; i < 5; ++i) {
-	        if (gpiod_line_request_set_value(cs_req_, CS_PINS[i], GPIOD_LINE_VALUE_ACTIVE) < 0) {
-	            std::perror("gpiod_line_request_set_value");
-	        }
-	    }
-	}
-	
-	void select_cs(int chipSelect) {
-	    if (!cs_req_) return;
-	
-	    for (int i = 0; i < 5; ++i) {
-	        int value = (chipSelect == i + 1) ? GPIOD_LINE_VALUE_INACTIVE
-	                                          : GPIOD_LINE_VALUE_ACTIVE;
-	        if (gpiod_line_request_set_value(cs_req_, CS_PINS[i], value) < 0) {
-	            std::perror("gpiod_line_request_set_value");
-	        }
-	    }
-	}
+        for (int i = 1; i < 6; i++) {
+            gpio_write(pi_, CS_PINS[i - 1], 1);
+        }
+    }
 
     // Reads a frame from the given chip select and decodes the payload. Returns empty vector on
     // failure.
@@ -537,16 +434,15 @@ class MasterShm {
         t.speed_hz = SPI_SPEED;
         t.bits_per_word = 8;
 
-		int rc = ioctl(spi_fd_, SPI_IOC_MESSAGE(1), &t);
-		deselect_all_cs();
-		if (rc < 0) {
-		    std::perror("SPI transfer failed");
-		    return {};
-		}
+        if (ioctl(spi_fd_, SPI_IOC_MESSAGE(1), &t) < 0) {
+            std::perror("SPI transfer failed");
+        }
 
-		std::vector<uint8_t> payload;
+        deselect_all_cs();
+
+        std::vector<uint8_t> payload;
         if (!decode_frame(rx, payload_len, payload)) {
-            return {};
+            payload.clear();
         }
         return payload;
     }
