@@ -97,8 +97,8 @@ class SensorShmReader:
             "steering": {"ts": d[4], "brake_pressure": d[5], "turn_angle": d[6]},
             "rpm_front": {"ts": d[7], "rpm_left": d[8], "rpm_right": d[9]},
             "rpm_back": {"ts": d[10], "rpm_left": d[11], "rpm_right": d[12]},
-            "gps": {"ts": d[13], "gps_lat": d[14], "gps_long": d[15]},
-            "motor": {"ts": d[16], "rpm": d[17], "throttle": d[18]},
+            "gps": {"ts": d[13], "gps_lat": d[14], "gps_long": d[15], "heading": d[16], "speed": d[17]},
+            "motor": {"ts": d[18], "rpm": d[19], "throttle": d[20]},
         }
 
 def main():
