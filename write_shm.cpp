@@ -482,15 +482,16 @@ class MasterShm {
 	    if (!rmc) rmc = strstr(buf, "$GPRMC");
 	    if (!rmc) return false;
 	
-	    double lat_ddmm, lon_ddmm, knots, heading;
+	    double lat_ddmm, lon_ddmm;
 	    char status, ns, ew;
 	
-	    if (sscanf(rmc, "%*[^,],%*[^,],%c,%lf,%c,%lf,%c,%lf,%lf",
-	               &status, &lat_ddmm, &ns, &lon_ddmm, &ew, &knots, &heading) != 7) {
+	    // Parse only required fields up through E/W
+	    if (sscanf(rmc, "%*[^,],%*[^,],%c,%lf,%c,%lf,%c",
+	               &status, &lat_ddmm, &ns, &lon_ddmm, &ew) != 5) {
 	        return false;
 	    }
 	
-	    if (status != 'A') return false;  // must be valid
+	    if (status != 'A') return false;
 	
 	    int lat_deg = int(lat_ddmm / 100.0);
 	    double lat_min = lat_ddmm - lat_deg * 100.0;
@@ -499,17 +500,44 @@ class MasterShm {
 	    int lon_deg = int(lon_ddmm / 100.0);
 	    double lon_min = lon_ddmm - lon_deg * 100.0;
 	    double lon = lon_deg + lon_min / 60.0;
-
-        double speed = 0.514444 * knots;
 	
 	    if (ns == 'S') lat = -lat;
 	    if (ew == 'W') lon = -lon;
 	
+	    float speed = NANF;
+	    float heading = NANF;
+	
+	    // Find field 7 (speed) and field 8 (course) manually
+	    int commas = 0;
+	    char *p = rmc;
+	    while (*p && commas < 7) {
+	        if (*p == ',') commas++;
+	        p++;
+	    }
+	
+	    if (commas >= 7 && *p && *p != ',' && *p != '*') {
+	        double knots;
+	        if (sscanf(p, "%lf", &knots) == 1) {
+	            speed = static_cast<float>(0.514444 * knots);
+	        }
+	    }
+	
+	    // Move to next field for course
+	    while (*p && *p != ',' && *p != '*') p++;
+	    if (*p == ',') p++;
+	
+	    if (*p && *p != ',' && *p != '*') {
+	        double course;
+	        if (sscanf(p, "%lf", &course) == 1) {
+	            heading = static_cast<float>(course);
+	        }
+	    }
+	
 	    out.ts = static_cast<uint32_t>(now_us());
 	    out.gps_lat = static_cast<float>(lat);
 	    out.gps_long = static_cast<float>(lon);
-		out.heading = static_cast<float>(heading);
-		out.speed = static_cast<float>(speed);
+	    out.heading = heading;
+	    out.speed = speed;
 	    return true;
 	}
 
