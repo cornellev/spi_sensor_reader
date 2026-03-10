@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 // 1 = fake, 0 = real ADC
 #define USE_FAKE_DATA   0
 
@@ -5,7 +7,7 @@
 #define N_CH            2
 
 // ADC GPIO pins (must be GPIO 26–29)
-constant int ADC_GPIOS[N_CH] = {26, 27};
+constant uint8_t ADC_GPIOS[N_CH] = {26, 27};
 
 // Linear conversion: value = m * volts + b
 constant float CONV_M[N_CH] = {1.0f, 1.0f};
@@ -24,3 +26,4 @@ constant float CONV_B[N_CH] = {0.0f, 0.0f};
 #define PIN_TX   7
 
 #define LED 25
+
