@@ -51,7 +51,7 @@ def format_snap(snap):
         d = snap[sensor]
 
         vals = "  ".join(
-            f"{NAME}{f}:{RESET} "
+            f"{HEADER}{f}:{RESET} "
             f"{VALUE}{d[f]:.3f}{RESET}" if isinstance(d[f], float)
             else f"{NAME}{f}:{RESET} {VALUE}{d[f]}{RESET}"
             for f in fields
