@@ -138,6 +138,8 @@ two analog inputs:
 In `pico_firmware/adc_general_firmware/telemetry_config.h`:
 
 ```c
+#include <stdint.h>
+
 // 1 = fake, 0 = real ADC
 #define USE_FAKE_DATA   0   
 
@@ -145,19 +147,19 @@ In `pico_firmware/adc_general_firmware/telemetry_config.h`:
 #define N_CH            2
 
 // ADC GPIO pins (must be GPIO 26–29)
-#define ADC_GPIOS       { 26, 27 }
+constant uint8_t ADC_GPIOS[N_CH] = {26, 27};
 
 // Linear conversion: value = m * volts + b
-#define CONV_M          { 1.0f, 1.0f } // I do not know the actual conversions you'll need.
-#define CONV_B          { 0.0f, 0.0f }
+constant float CONV_M[N_CH] = {1.0f, 1.0f};  // I do not know the actual conversions you'll need.
+constant float CONV_B[N_CH] = {0.0f, 0.0f};
 
 // ADC parameters
-#define ADC_DEADZONE    0              // Similarly I do not know this
+#define ADC_DEADZONE    0                    // Similarly I do not know this
 #define ADC_VREF        3.3f
 #define ADC_COUNTS_MAX  4095.0f
 
 // SPI pins and LED
-#define SPI_PORT        spi0           // Use what pins are available         
+#define SPI_PORT        spi0                 // Use what pins are available         
 #define PIN_RX          4
 #define PIN_CS          9
 #define PIN_SCK         6
