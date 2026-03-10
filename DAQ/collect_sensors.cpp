@@ -16,16 +16,16 @@
 #include <unistd.h>
 #include <vector>
 
+#include "unframe.h"
+
 // #include "lib/arduPi.h"
 // #include "lib/sim7x00.h"
 
 constexpr uint8_t GPS_POWERKEY = 8;
 
-static constexpr uint8_t FLAG_BYTE = 0x7E;
 static constexpr int SPI_READ_MAX = 64; // >= worst-case frame
 
-// constexpr uint8_t SPI_MODE = 1;         // CPOL=0, CPHA=1
-constexpr uint8_t SPI_MODE = SPI_MODE_1 | SPI_CS_HIGH;  // CPOL=0, CPHA=1, CS active high
+constexpr uint8_t SPI_MODE = 1;         // CPOL=0, CPHA=1
 constexpr uint32_t SPI_SPEED = 1000000; // 1 MHz
 constexpr const char *SPI_DEVICE = "/dev/spidev0.0";
 
@@ -39,136 +39,7 @@ static constexpr int CS_PINS[5] = {22, 23, 24, 25, 26};
 // 25 - RPM back
 // 26 - Motor
 
-constexpr float NANF = (std::nanf("1"));
-
-static inline uint64_t now_us() {
-    timespec ts{};
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return uint64_t(ts.tv_sec) * 1000000ULL + uint64_t(ts.tv_nsec) / 1000ULL;
-}
-
-static uint32_t crc32_ieee(const uint8_t *data, size_t len) {
-    uint32_t crc = 0xFFFFFFFFu;
-    for (size_t i = 0; i < len; i++) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; j++) {
-            crc = (crc & 1u) ? ((crc >> 1) ^ 0xEDB88320u) : (crc >> 1);
-        }
-    }
-    return ~crc;
-}
-
-static inline uint32_t u32_le_bytes(const uint8_t *p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static inline float f32_le_bytes(const uint8_t *p) {
-    uint32_t bits = u32_le_bytes(p);
-    float out;
-    std::memcpy(&out, &bits, sizeof(out));
-    return out;
-}
-
-static inline uint8_t get_bit_msb(const std::vector<uint8_t>& data, int bit_index) {
-    const int byte_i = bit_index >> 3;
-    const int bit_i  = bit_index & 7;
-    if (byte_i < 0 || (size_t)byte_i >= data.size()) return 0;
-    return (data[(size_t)byte_i] >> (7 - bit_i)) & 1u;
-}
-
-static bool find_two_flags(const std::vector<uint8_t> &rx,
-                           int *first_flag_end_bit,
-                           int *second_flag_end_bit) {
-    *first_flag_end_bit = -1;
-    *second_flag_end_bit = -1;
-
-    uint8_t sh = 0;
-    const int nbits = (int)rx.size() * 8;
-
-    for (int bi = 0; bi < nbits; bi++) {
-        sh = (uint8_t)((sh << 1) | get_bit_msb(rx, bi));
-        if (sh == FLAG_BYTE) {
-            if (*first_flag_end_bit < 0) {
-                *first_flag_end_bit = bi; // last bit of first flag
-                sh = 0;
-            } else {
-                *second_flag_end_bit = bi; // last bit of second flag
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-
-static bool bit_unstuff_range(const std::vector<uint8_t>& in,
-                              int start_bit,
-                              int end_bit_exclusive,
-                              uint8_t* out,
-                              size_t out_cap_bytes,
-                              size_t* out_bitpos) {
-    int ones = 0;
-
-    for (int bi = start_bit; bi < end_bit_exclusive && *out_bitpos < out_cap_bytes * 8; bi++) {
-        const uint8_t bit = get_bit_msb(in, bi);
-
-        // If we've already seen five 1s, this bit MUST be a stuffed 0 and must be skipped.
-        if (ones == 5) {
-            if (bit != 0) return false; // invalid stuffing
-            ones = 0;
-            continue;
-        }
-
-        const size_t byte_i = (*out_bitpos) >> 3;
-        const size_t bit_i  = (*out_bitpos) & 7;
-        if (byte_i >= out_cap_bytes) return false;
-
-        if (bit) out[byte_i] |= (uint8_t)(1u << (7 - bit_i));
-        (*out_bitpos)++;
-
-        if (bit) ones++;
-        else     ones = 0;
-    }
-
-    return true;
-}
-
-static bool decode_frame(const std::vector<uint8_t>& rx,
-                         size_t payload_len,
-                         std::vector<uint8_t>& payload_out) {
-    payload_out.clear();
-    if (payload_len == 0) return false;
-
-    // Find flags and compute where the data bits are.
-    int first_flag_end_bit;
-    int second_flag_end_bit;
-    if (!find_two_flags(rx, &first_flag_end_bit, &second_flag_end_bit)) return false;
-
-    const int data_start_bit = first_flag_end_bit + 1;
-    const int data_end_bit_exclusive = second_flag_end_bit - 7;
-
-    if (data_end_bit_exclusive <= data_start_bit) return false;
-
-    const size_t want_bytes = payload_len + 4; // payload + crc32
-
-    // Unstuff bits in the data range into out[], which should now contain payload || crc_le
-    std::vector<uint8_t> out(want_bytes, 0);
-    size_t out_bitpos = 0;
-    if (!bit_unstuff_range(rx, data_start_bit, data_end_bit_exclusive,
-                           out.data(), out.size(), &out_bitpos)) {
-        return false;
-    }
-
-    if (out_bitpos < want_bytes * 8) return false;
-
-    // Check CRC
-    const uint32_t crc_rx = u32_le_bytes(out.data() + payload_len);
-    const uint32_t crc_ok = crc32_ieee(out.data(), payload_len);
-    if (crc_rx != crc_ok) return false;
-
-    payload_out.assign(out.begin(), out.begin() + (ptrdiff_t)payload_len);
-    return true;
-}
+constexpr float NANF = std::nanf("1");
 
 #pragma pack(push, 1)
 struct Power { // All from Power Pico
@@ -246,7 +117,7 @@ static constexpr const char *SHM_NAME = "/sensor_shm";
 
 // Ctrl+C flag
 static volatile sig_atomic_t g_stop = 0;
-static void handle_sigint(int) {
+static inline void handle_sigint(int) {
     g_stop = 1;
 }
 
@@ -335,38 +206,27 @@ class MasterShm {
     GPS gps_cache_{};
     std::thread gps_thread_;
     std::atomic<bool> stop_{false};
-	FILE *gps_file_{nullptr};
     bool gps_started_{false};
     int gps_serial_{-1};
 
-	void init_gps() {
-	    gps_serial_ = open("/dev/serial0", O_RDONLY | O_NOCTTY);
-	    if (gps_serial_ < 0) {
-	        std::perror("Failed to open GPS serial");
-	        return;
-	    }
-	
-	    gps_file_ = fdopen(gps_serial_, "r");
-	    if (!gps_file_) {
-	        std::perror("fdopen failed");
-	        close(gps_serial_);
-	        gps_serial_ = -1;
-	        return;
-	    }
-	
-	    std::fprintf(stdout, "GPS fd: %d\n", gps_serial_);
-	
-	    GPS g{};
-	    g.ts = 0;
-	    g.gps_lat = NANF;
-	    g.gps_long = NANF;
-	    g.heading = NANF;
-	    g.speed = NANF;
-	    publish_gps(g);
-	
-	    gps_started_ = true;
-	    gps_thread_ = std::thread([this]() { this->gps_loop(); });
-	}
+    void init_gps() {
+        gps_serial_ = open("/dev/serial0", O_RDONLY | O_NOCTTY);
+            
+        if(gps_serial_ < 0) {
+            std::perror("Failed to open GPS serial");
+        }
+        
+        std::fprintf(stdout, "GPS fd: %d\n", gps_serial_);
+    
+        GPS g{};
+        g.ts = 0;
+        g.gps_lat = NANF;
+        g.gps_long = NANF;
+        publish_gps(g);
+    
+        gps_started_ = true;
+        gps_thread_ = std::thread([this]() { this->gps_loop(); });
+    }
 
     bool init_shm() {
         shm_fd_ = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
@@ -423,13 +283,13 @@ class MasterShm {
 
     void select_cs(int chipSelect) {
         for (int i = 1; i < 6; i++) {
-            gpio_write(pi_, CS_PINS[i - 1], chipSelect == i ? 1 : 0);
+            gpio_write(pi_, CS_PINS[i - 1], chipSelect == i ? 0 : 1);
         }
     }
 
     void deselect_all_cs() {
         for (int i = 1; i < 6; i++) {
-            gpio_write(pi_, CS_PINS[i - 1], 0);
+            gpio_write(pi_, CS_PINS[i - 1], 1);
         }
     }
 
@@ -551,14 +411,28 @@ class MasterShm {
 	    return true;
 	}
 
-	void gps_loop() {
-	    while (!stop_.load(std::memory_order_relaxed)) {
-	        GPS g{};
-	        if (poll_gps_once(g)) {
-	            publish_gps(g);
-	        }
-	    }
-	}
+    void gps_loop() {
+        uint64_t next_poll = now_us();
+
+        while (!stop_.load(std::memory_order_relaxed)) {
+            if (!gps_started_) {
+                usleep(100000); // 100 ms backoff if GPS never started
+                continue;
+            }
+
+            uint64_t t = now_us();
+            if (t >= next_poll) {
+                next_poll += 200000ULL; // 5 Hz
+
+                GPS g{}; // This is fine because we don't publish failed reads
+                if (poll_gps_once(g)) {
+                    publish_gps(g);
+                }
+            }
+
+            usleep(2000);
+        }
+    }
 
     void timer_callback() {
         auto power_p = readFramePayload(1, sizeof(Power));       // 12

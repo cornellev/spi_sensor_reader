@@ -69,14 +69,14 @@ All timestamps are in microseconds.
 
 ## Quick Start
 
-1. **Compile & run the C++ writer**
+1. **Compile & run the C++ DAQ Master / SHM Writer**
    ```bash
-    g++ -O2 -std=c++17 write_shm.cpp \
+    g++ -O2 -std=c++17 DAQ/collect_sensors.cpp \
     -lpigpiod_if2 -lrt -pthread \
-    -o shm_writer
+    -o collect_sensors
 
     sudo pigpiod
-    ./shm_writer
+    ./collect_sensors
    ```
    Keep this running in one terminal or screen, Ctrl+C to stop cleanly. Even better
    if you register it as a systemd service. 
@@ -121,7 +121,7 @@ which expects a combination of a digital pulse signal and analog signal. The res
 should be analog though, so we have made it easy to configure the firmware to work with any of these
 sensors.
 
-The Pico firmware (`pico_firmware/adc_general_firmware/spi_slave.c`) acts as an SPI slave device. Whenever
+The Pico firmware (`pico_firmware/adc_general_firmware/adc_sensor_node.c`) acts as an SPI slave device. Whenever
 the master asserts chip-select, the Pico responds with a single HDLC-framed message
 containing a timestamp and a fixed number of ADC readings. The payload is CRC-protected
 and bit-stuffed, so it can be safely parsed by the existing HDLC decoder on the host.
@@ -156,6 +156,13 @@ In `pico_firmware/adc_general_firmware/telemetry_config.h`:
 #define ADC_VREF        3.3f
 #define ADC_COUNTS_MAX  4095.0f
 
+// SPI pins and LED
+#define SPI_PORT        spi0           // Use what pins are available         
+#define PIN_RX          4
+#define PIN_CS          9
+#define PIN_SCK         6
+#define PIN_TX          7
+#define LED             25
 ```
 
 Additionally, when building the Pico firmware, ensure the `pico_firmware/adc_general_firmware` directory is added 

@@ -28,34 +28,36 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(rpm_firmware C CXX ASM)
+project(adc_sensor_node C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(rpm_firmware rpm_firmware.c ../framed_spi.c)
+add_executable(adc_sensor_node
+    adc_sensor_node.c
+    ../framed_spi.c
+)
 
-pico_set_program_name(rpm_firmware "rpm_firmware")
-pico_set_program_version(rpm_firmware "0.1")
+pico_set_program_name(adc_sensor_node "adc_sensor_node")
+pico_set_program_version(adc_sensor_node "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(rpm_firmware 0)
-pico_enable_stdio_usb(rpm_firmware 1)
+pico_enable_stdio_uart(adc_sensor_node 0)
+pico_enable_stdio_usb(adc_sensor_node 1)
 
 # Add the standard library to the build
-target_link_libraries(rpm_firmware
+target_link_libraries(adc_sensor_node
         pico_stdlib
+        hardware_adc
         hardware_spi
-        hardware_dma
-        hardware_sync
-        )
+        hardware_dma)
 
 # Add the standard include files to the build
-target_include_directories(rpm_firmware PRIVATE
+target_include_directories(adc_sensor_node PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
-pico_add_extra_outputs(rpm_firmware)
+pico_add_extra_outputs(adc_sensor_node)
 
