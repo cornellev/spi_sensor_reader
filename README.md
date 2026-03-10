@@ -46,8 +46,8 @@ The system is designed to be extended as additional sensors are brought online.
         "ts": int,                  # read_snapshot()[1][13]
         "lat": float,               # read_snapshot()[1][14]
         "long": float,              # read_snapshot()[1][15]
-        "heading": float,           # read_snapshot()[1][16]
-        "speed": float,             # read_snapshot()[1][17]
+        "heading": float,           # read_snapshot()[1][16] (usually empty)
+        "speed": float,             # read_snapshot()[1][17] (m/s)
     },
     "motor": {
         "ts": int,                  # read_snapshot()[1][18]
