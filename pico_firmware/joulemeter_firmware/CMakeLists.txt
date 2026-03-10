@@ -28,24 +28,24 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(motor_firmware C CXX ASM)
+project(joulemeter_firmware C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(motor_firmware motor_firmware.c ../framed_spi.c)
+add_executable(joulemeter_firmware joulemeter_firmware.c ../framed_spi.c)
 
-pico_set_program_name(motor_firmware "motor_firmware")
-pico_set_program_version(motor_firmware "0.1")
+pico_set_program_name(joulemeter_firmware "joulemeter_firmware")
+pico_set_program_version(joulemeter_firmware "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(motor_firmware 0)
-pico_enable_stdio_usb(motor_firmware 1)
+pico_enable_stdio_uart(joulemeter_firmware 0)
+pico_enable_stdio_usb(joulemeter_firmware 1)
 
 # Add the standard library to the build
-target_link_libraries(motor_firmware
+target_link_libraries(joulemeter_firmware
         pico_stdlib
         hardware_spi
         hardware_i2c
@@ -53,9 +53,9 @@ target_link_libraries(motor_firmware
         hardware_adc)
 
 # Add the standard include files to the build
-target_include_directories(motor_firmware PRIVATE
+target_include_directories(joulemeter_firmware PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
-pico_add_extra_outputs(motor_firmware)
+pico_add_extra_outputs(joulemeter_firmware)
 
