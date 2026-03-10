@@ -48,8 +48,8 @@ static void build_payload(uint8_t *payload, uint32_t now_us) {
     int16_t signed_shunt = (int16_t)sensor_data.raw_shunt;
     float shunt_mv = signed_shunt * (2.5f / 1000.0f) * (32.0f / 27.0f);
 
-    framed_spi_pack_f32_le(&payload[4], 0.0f);     // Current
-    framed_spi_pack_f32_le(&payload[8], shunt_mv); // Voltage
+    framed_spi_pack_f32_le(&payload[4], shunt_mv);     // Current
+    framed_spi_pack_f32_le(&payload[8], 0.0f);         // Voltage
 }
 
 static void irq_handler(uint gpio, uint32_t events) {
