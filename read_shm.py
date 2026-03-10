@@ -26,8 +26,18 @@ BLOCK_SIZE = SEQ_SIZE + SENSOR_SIZE
 def _read_seq(buf) -> int:
     return struct.unpack_from(SEQ_FMT, buf, 0)[0]
 
+RESET = "\033[0m"
+NAME  = "\033[1;34m"   # bold blue
+VALUE = "\033[1;32m"   # bold green
+TS    = "\033[0;36m"   # cyan
+HEADER = "\033[1;33m"  # yellow
+
 def format_snap(snap):
-    lines = [f"seq: {snap['seq']}  ts: {snap['global_ts']}"]
+    lines = [
+        f"{HEADER}seq:{RESET} {VALUE}{snap['seq']}{RESET}  "
+        f"{HEADER}ts:{RESET} {VALUE}{snap['global_ts']}{RESET}"
+    ]
+
     sensors = {
         "power":     ["current", "voltage"],
         "steering":  ["brake_pressure", "turn_angle"],
@@ -36,10 +46,22 @@ def format_snap(snap):
         "gps":       ["gps_lat", "gps_long", "heading", "speed"],
         "motor":     ["rpm", "throttle"],
     }
+
     for sensor, fields in sensors.items():
         d = snap[sensor]
-        vals = "  ".join(f"{f}: {d[f]:.3f}" if isinstance(d[f], float) else f"{f}: {d[f]}" for f in fields)
-        lines.append(f"  {sensor:<12} ts: {d['ts']:<12} {vals}")
+
+        vals = "  ".join(
+            f"{NAME}{f}:{RESET} "
+            f"{VALUE}{d[f]:.3f}{RESET}" if isinstance(d[f], float)
+            else f"{NAME}{f}:{RESET} {VALUE}{d[f]}{RESET}"
+            for f in fields
+        )
+
+        lines.append(
+            f"  {NAME}{sensor:<12}{RESET} "
+            f"{TS}ts:{RESET} {VALUE}{d['ts']:<12}{RESET} {vals}"
+        )
+
     return "\n".join(lines)
 
 class SensorShmReader:
