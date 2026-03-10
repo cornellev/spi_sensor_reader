@@ -71,7 +71,7 @@ All timestamps are in microseconds.
 
 1. **Compile & run the C++ DAQ Master / SHM Writer**
    ```bash
-    g++ -O2 -std=c++17 DAQ/collect_sensors.cpp \
+    g++ -O2 -std=c++17 pi_software/collect_sensors.cpp \
     -lpigpiod_if2 -lrt -pthread \
     -o collect_sensors
 
