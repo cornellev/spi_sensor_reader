@@ -67,10 +67,7 @@ static float read_channel(int i) {
 
     float v = adc_counts_to_volts(raw);
 
-    static const float conv_m[] = CONV_M;
-    static const float conv_b[] = CONV_B;
-
-    return conv_m[i] * v + conv_b[i];
+    return CONV_M[i] * v + CONV_B[i];
 #endif
 }
 
@@ -108,9 +105,8 @@ int main(void) {
 
 #if !USE_FAKE_DATA
     adc_init();
-    static const uint8_t adc_gpios[] = ADC_GPIOS;
     for (int i = 0; i < N_CH; i++) {
-        adc_gpio_init(adc_gpios[i]);
+        adc_gpio_init(ADC_GPIOS[i]);
     }
 #endif
 
