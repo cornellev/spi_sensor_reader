@@ -598,7 +598,7 @@ class MasterShm {
             snap.steering_snap.turn_angle = f32_le_bytes(p + 8);
         } else {
 			errcount++;
-            std::fprintf(stderr, "Failed to read Power frame, errcount %d\n", errcount);
+            std::fprintf(stderr, "Failed to read Steering frame, errcount %d\n", errcount);
 			
             snap.steering_snap.ts = 0;
             snap.steering_snap.brake_pressure = NANF;
@@ -612,7 +612,7 @@ class MasterShm {
             snap.rpm_snap_front.rpm_right = f32_le_bytes(p + 8);
         } else {
 			errcount++;
-            std::fprintf(stderr, "Failed to read Power frame, errcount %d\n", errcount);
+            std::fprintf(stderr, "Failed to read RPM frame, errcount %d\n", errcount);
 			
             snap.rpm_snap_front.ts = 0;
             snap.rpm_snap_front.rpm_left = NANF;
@@ -637,7 +637,7 @@ class MasterShm {
             snap.motor_snap.throttle = f32_le_bytes(p + 8);
         } else {
 			errcount++;
-            std::fprintf(stderr, "Failed to read Power frame, errcount %d\n", errcount);
+            std::fprintf(stderr, "Failed to read Motor frame, errcount %d\n", errcount);
 			
             snap.motor_snap.ts = 0;
             snap.motor_snap.rpm = NANF;
