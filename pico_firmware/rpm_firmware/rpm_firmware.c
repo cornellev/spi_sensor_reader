@@ -42,16 +42,9 @@ static framed_spi_t framed;
 
 // Checks if RPMs have been stale for too long and sets them to 0 if so
 static void check_rpms_zero(void) {
-    uint32_t now = (uint32_t)time_us_64();
-
-    bool is_zero_l = (motor_l_rpm > 0.0f) &&
-                     ((uint32_t)(now - last_rise_l_us) > RPM_TIMEOUT_US);
-    bool is_zero_r = (motor_r_rpm > 0.0f) &&
-                     ((uint32_t)(now - last_rise_r_us) > RPM_TIMEOUT_US);
-
-    if (!is_zero_l && !is_zero_r) return;
-
     uint32_t save = save_and_disable_interrupts();
+
+    uint32_t now = (uint32_t)time_us_64();
 
     if (motor_l_rpm > 0.0f &&
         (uint32_t)(now - last_rise_l_us) > RPM_TIMEOUT_US) {
@@ -87,10 +80,13 @@ static void update_rpm(volatile uint32_t *last_rise_us, volatile float *motor_rp
 }
 
 static void build_payload(uint8_t *payload) {
-    uint32_t ts = (uint32_t)time_us_64();
+    uint32_t save = save_and_disable_interrupts();
 
+    uint32_t ts = (uint32_t)time_us_64();
     float rpm_l = motor_l_rpm;
     float rpm_r = motor_r_rpm;
+
+    restore_interrupts(save);
 
     framed_spi_pack_u32_le(&payload[0], ts);
     framed_spi_pack_f32_le(&payload[4], rpm_l);
