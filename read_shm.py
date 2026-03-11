@@ -118,6 +118,18 @@ class SensorShmReader:
         }
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Read sensor shared memory")
+    parser.add_argument(
+        "mode",
+        choices=["formatted", "unformatted"],
+        nargs="?",
+        default="formatted",
+        help="Output mode"
+    )
+    args = parser.parse_args()
+
     RATE = 10
     PERIOD = 1 / RATE
 
@@ -129,8 +141,12 @@ def main():
         while True:
             snap = reader.read_snapshot_dict()
             if snap is not None:
-                print(format_snap(snap))
-                # print(snap)
+                if args.mode == "formatted":
+                    print(format_snap(snap))
+                elif args.mode == "formatted":
+                    print(snap)
+                else:
+                    print("Usage: python reader.py [formatted | unformatted]")
             time.sleep(PERIOD)
     finally:
         reader.close()
