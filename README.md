@@ -54,6 +54,9 @@ The system is designed to be extended as additional sensors are brought online.
         "rpm": float,               # read_snapshot()[1][19]
         "throttle": float,          # read_snapshot()[1][20]
     },
+    "filtered": {
+        "speed": float              # read_snapshot()[1][21]
+    }
 }
 ```
 ### Timestamp notes:
