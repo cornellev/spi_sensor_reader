@@ -1,4 +1,3 @@
-import time
 import struct
 from multiprocessing import shared_memory, resource_tracker
 
@@ -119,6 +118,7 @@ class SensorShmReader:
 
 def main():
     import argparse
+    import time
 
     parser = argparse.ArgumentParser(description="Read sensor shared memory")
     parser.add_argument(
@@ -143,7 +143,7 @@ def main():
             if snap is not None:
                 if args.mode == "formatted":
                     print(format_snap(snap))
-                elif args.mode == "formatted":
+                elif args.mode == "unformatted":
                     print(snap)
                 else:
                     print("Usage: python reader.py [formatted | unformatted]")
