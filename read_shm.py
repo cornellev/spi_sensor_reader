@@ -45,6 +45,7 @@ def format_snap(snap):
         "rpm_back":  ["rpm_left", "rpm_right"],
         "gps":       ["gps_lat", "gps_long", "heading", "speed"],
         "motor":     ["rpm", "throttle"],
+        "filtered":  ["speed"]
     }
 
     for sensor, fields in sensors.items():
@@ -137,7 +138,7 @@ class SensorShmReader:
             "rpm_back": {"ts": d[10], "rpm_left": d[11], "rpm_right": d[12]},
             "gps": {"ts": d[13], "lat": d[14], "long": d[15], "heading": d[16], "speed": d[17]},
             "motor": {"ts": d[18], "rpm": d[19], "throttle": d[20]},
-            "filtered": {"speed": 0.0}
+            "filtered": {"speed": d[21]}
         }
 
 def main():

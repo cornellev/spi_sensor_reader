@@ -55,7 +55,7 @@ The system is designed to be extended as additional sensors are brought online.
         "throttle": float,          # read_snapshot()[1][20]
     },
     "filtered": {
-        "speed": float              # read_snapshot()[1][21]
+        "speed": float              # read_snapshot()[1][21] (m/s)
     }
 }
 ```
