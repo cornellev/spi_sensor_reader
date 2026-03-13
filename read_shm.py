@@ -172,7 +172,8 @@ def main():
                 elif args.mode == "unformatted":
                     print(snap)
                 else:
-                    print("Usage: python reader.py [formatted | unformatted]")
+                    print("Usage: python3 read_shm.py [formatted | unformatted]")
+                    break;
             time.sleep(PERIOD)
     finally:
         reader.close()
