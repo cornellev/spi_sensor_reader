@@ -46,22 +46,24 @@ def format_snap(snap):
         "rpm_back":  ["rpm_left", "rpm_right"],
         "gps":       ["lat", "long", "heading", "speed"],
         "motor":     ["rpm", "throttle"],
-        "filtered":  ["speed"]
+        "filtered":  ["speed"],
     }
 
     for sensor, fields in sensors.items():
         d = snap[sensor]
 
         vals = "  ".join(
-            f"{NAME}{f}:{RESET} "
-            f"{VALUE}{d[f]}{RESET}" if isinstance(d[f], float)
-            else f"{NAME}{f}:{RESET} {VALUE}{d[f]}{RESET}"
+            f"{NAME}{f}:{RESET} {VALUE}{d[f]}{RESET}"
             for f in fields
         )
 
+        ts_part = (
+            f"{TS}ts:{RESET} {VALUE}{d['ts']:<12}{RESET} "
+            if "ts" in d else ""
+        )
+
         lines.append(
-            f"  {NAME}{sensor:<12}{RESET} "
-            f"{TS}ts:{RESET} {VALUE}{d['ts']:<12}{RESET} {vals}"
+            f"  {NAME}{sensor:<12}{RESET} {ts_part}{vals}"
         )
 
     return "\n".join(lines)
